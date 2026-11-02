@@ -72,7 +72,7 @@ agent → 后端（NDJSON）与 后端 → 浏览器（SSE `data:`）使用同�
 skill 是「怎么把一类事做好」的做法，写在 `skills/<名字>/SKILL.md` 里：frontmatter 写 `name`、`description`，正文是步骤。
 
 - **来源**：仓库内置 `skills/`，以及 `<data_dir>/skills/`（用户本地，不入库）。同名时用户的覆盖内置的。
-- **按需加载**：后端 `GET /internal/turns/:id/context` 只带 `skills` 名单（名字 + 描述），正文由 agent 用 `use_skill` 工具向 `GET /internal/skills/<name>` 取。当前对话用不到的 skill 不占上下文。
+- **按需加载**：系统提示里只留一句「有可用的 skill，需要时查」，不列清单。清单（名字 + 描述）由 `use_skill` 不带参数时向 `GET /internal/skills` 取，正文由 `use_skill(name)` 向 `GET /internal/skills/<name>` 取。用不到的 skill 一个字符都不占上下文；提示本身也不随 skill 数量变化，对前缀缓存友好。代价是发现要靠模型主动调用一次。
 - **附带文件**：说明里引用的模板、规范通过 `use_skill({ name, file })` 读，落到 `GET /internal/skills/<name>/files/<路径>`。
 - **不越界**：读取时按 realpath 校验，路径必须留在该 skill 目录内；指向目录外的符号链接不算它的内容。
 - **发现放在后端**：设置页要列出全部 skill 与问题，而 agent 不保存状态，所以由后端解析文件、校验 frontmatter，有问题的 skill 不下发给模型。
