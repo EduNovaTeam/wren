@@ -8,7 +8,8 @@
 
 - skill：agent 可以通过 `use_skill` 使用 `skills/` 下的做法说明。系统提示只说明「有可用 skill」，清单与正文都在需要时获取，用不到的 skill 不占上下文。
 - `use_skill` 可以读取 skill 目录内的附带文件（如 `references/style.md`、`assets/template.md`）；路径越出该 skill 目录会被拒绝。
-- 对话里可以用 `/skill-name` 指定本次使用某个 skill，正文直接进入该回合的系统提示；名字不存在或 skill 有问题时，发送前就会报错。
+- 对话里可以用 `/skill-name` 指定本次使用某个 skill，正文直接进入系统提示；名字不存在或 skill 有问题时，发送前就会报错。
+- skill 用过一次后在后续对话里继续生效：`/skill-name` 点过，或 agent 读过它的正文，都会记为会话级生效。目前没有取消的入口，删掉会话即清空。
 - `GET /api/skills` 返回全部 skill 及其校验结果；有问题的 skill 只在设置侧展示，不下发给模型。
 - skill 支持两个来源：仓库内置 `skills/` 与本地 `data/skills/`，同名时以本地为准。
 
