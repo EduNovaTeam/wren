@@ -4,6 +4,13 @@
 
 ## [未发布]
 
+### 新增
+
+- skill：agent 可以通过 `use_skill` 使用 `skills/` 下的做法说明。系统提示只列名字与一句话描述，正文按需加载，当前对话用不到的 skill 不占上下文。
+- `use_skill` 可以读取 skill 目录内的附带文件（如 `references/style.md`、`assets/template.md`）；路径越出该 skill 目录会被拒绝。
+- `GET /api/skills` 返回全部 skill 及其校验结果；有问题的 skill 只在设置侧展示，不下发给模型。
+- skill 支持两个来源：仓库内置 `skills/` 与本地 `data/skills/`，同名时以本地为准。
+
 ## [0.1.0] - 2026-11-01
 
 ### 新增
