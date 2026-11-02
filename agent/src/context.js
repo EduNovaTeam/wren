@@ -49,11 +49,35 @@ export const skillsSection = {
       : null,
 };
 
+/**
+ * 用户用 `/skill-name` 点名的 skill，正文直接写进系统提示。
+ *
+ * 排最后：这一段的存废随用户每条消息变化，靠后能少破坏前面的前缀缓存。
+ * @type {PromptSection}
+ */
+export const activeSkillsSection = {
+  id: 'active-skills',
+  render: (ctx) => {
+    const active = ctx.active_skills ?? [];
+    if (!active.length) return null;
+    return active
+      .map((skill) => {
+        const parts = [`用户指定本回合使用 skill「${skill.name}」（${skill.description}），照它说的做：`, skill.body];
+        if (skill.files?.length) {
+          parts.push(`附带文件：${skill.files.join('、')}。需要时用 use_skill({ name: '${skill.name}', file }) 读取。`);
+        }
+        return parts.join('\n\n');
+      })
+      .join('\n\n');
+  },
+};
+
 export const DEFAULT_SECTIONS = [
   identitySection,
   environmentSection,
   userInstructionsSection,
   skillsSection,
+  activeSkillsSection,
 ];
 
 /**

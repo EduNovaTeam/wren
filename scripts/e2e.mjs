@@ -83,6 +83,22 @@ async function main() {
   const toolMessage = skillEvents.find((e) => e.type === 'message' && e.message.role === 'tool');
   check(toolMessage && toolMessage.message.content.includes('# 写周报'), 'skill 正文没有进入工具结果');
 
+  // 用户用 /skill-name 点名：正文由后端随上下文下发，模型不必再调工具
+  llm.push({ text: '好的，按周报 skill 的格式写。' });
+  const invoked = await call('POST', `${base}/api/sessions/${session.id}/turns`, {
+    content: '/weekly-report 本周做了 A',
+  });
+  const invokedEvents = await readSse(`${base}/api/turns/${invoked.turn_id}/events`);
+  check(
+    invokedEvents.at(-1)?.status === 'done',
+    `点名 skill 的回合应以 done 结束：${JSON.stringify(invokedEvents.at(-1))}`,
+  );
+  const system = llm.requests.at(-1).messages[0];
+  check(
+    system.role === 'system' && system.content.includes('# 写周报'),
+    `点名 skill 的正文没有进入系统提示：${String(system.content).slice(0, 200)}`,
+  );
+
   await llm.close();
   console.log(`e2e ok：${types.length} 个事件，${turns[0].messages.length} 条消息`);
 }

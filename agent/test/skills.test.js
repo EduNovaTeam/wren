@@ -127,3 +127,29 @@ test('system prompt drops the skill section when nothing is installed', () => {
   assert.doesNotMatch(without, /可用的 skill/);
   assert.doesNotMatch(without, /\n\n\n/);
 });
+
+test('a skill invoked with /name gets its body written into the prompt', () => {
+  const prompt = buildSystemPrompt(DEFAULT_SECTIONS, {
+    system_prompt: '',
+    skills: LIST,
+    active_skills: [
+      {
+        name: 'weekly-report',
+        description: '按团队模板撰写个人周报。',
+        body: '# 写周报\n\n先读模板',
+        files: ['references/template.md'],
+        allowed_tools: [],
+      },
+    ],
+  });
+  assert.match(prompt, /用户指定本回合使用 skill「weekly-report」/);
+  assert.match(prompt, /先读模板/);
+  assert.match(prompt, /references\/template\.md/);
+  // 点名的 skill 放在「有可用 skill」提示之后，两条都在也不冲突
+  assert.ok(prompt.indexOf('用户指定本回合使用') > prompt.indexOf('有可用的 skill'));
+});
+
+test('prompt has no active skill section when the user did not name one', () => {
+  const prompt = buildSystemPrompt(DEFAULT_SECTIONS, { system_prompt: '', skills: LIST });
+  assert.doesNotMatch(prompt, /用户指定本回合使用/);
+});

@@ -26,6 +26,16 @@
  */
 
 /**
+ * 用户用 `/skill-name` 点名的 skill：正文随上下文直接下发，本回合不必再查。
+ * @typedef {object} ActiveSkill
+ * @property {string} name
+ * @property {string} description
+ * @property {string} body
+ * @property {string[]} files
+ * @property {string[]} allowed_tools
+ */
+
+/**
  * 后端 `GET /internal/turns/:id/context` 的返回值。
  * @typedef {object} TurnContext
  * @property {number} session_id
@@ -34,6 +44,7 @@
  * @property {string} system_prompt  用户在设置页填写的自定义提示，可能为空
  * @property {Record<string, boolean>} tool_switches
  * @property {SkillSummary[]} skills  可用的 skill 清单（只有名字和描述，正文按需读取）
+ * @property {ActiveSkill[]} active_skills  本回合用户点名的 skill
  * @property {HistoryTurn[]} history  按时间顺序，已结束的回合
  * @property {ChatMessage} user_message
  */
