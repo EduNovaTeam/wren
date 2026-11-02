@@ -34,7 +34,29 @@ export const userInstructionsSection = {
   render: (ctx) => (ctx.system_prompt.trim() ? `用户的附加要求：\n${ctx.system_prompt.trim()}` : null),
 };
 
-export const DEFAULT_SECTIONS = [identitySection, environmentSection, userInstructionsSection];
+/**
+ * 可用 skill 的清单：只有名字和一句话描述，正文由 `use_skill` 按需取。
+ * 放在最后：skill 清单可能随安装变化，靠后会少影响前缀缓存。
+ * @type {PromptSection}
+ */
+export const skillsSection = {
+  id: 'skills',
+  render: (ctx) => {
+    const list = ctx.skills ?? [];
+    if (!list.length) return null;
+    return [
+      '可用的 skill（用户的要求正好属于其中某一类时，先用 use_skill 读取它的完整说明再动手，不要凭名字猜内容）：',
+      ...list.map((skill) => `- ${skill.name}：${skill.description}`),
+    ].join('\n');
+  },
+};
+
+export const DEFAULT_SECTIONS = [
+  identitySection,
+  environmentSection,
+  userInstructionsSection,
+  skillsSection,
+];
 
 /**
  * @param {PromptSection[]} sections

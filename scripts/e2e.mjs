@@ -68,6 +68,21 @@ async function main() {
   const second = llm.requests[1];
   check(second.messages.some((m) => m.role === 'tool'), '第二次模型请求应包含工具结果');
 
+  // skill：agent 按需从 /internal/skills 取正文，验证两边的接口对得上
+  const skill = await call('GET', `${base}/internal/skills/weekly-report`, undefined, {
+    'X-Wren-Internal-Token': 'e2e-token',
+  });
+  check(skill.files.includes('references/template.md'), `skill 应带模板文件：${skill.files}`);
+  llm.push(
+    { reasoning: '按周报 skill 写', tool_calls: [{ name: 'use_skill', arguments: { name: 'weekly-report' } }] },
+    { text: '已读取周报 skill。' },
+  );
+  const skillTurn = await call('POST', `${base}/api/sessions/${session.id}/turns`, { content: '帮我写周报' });
+  const skillEvents = await readSse(`${base}/api/turns/${skillTurn.turn_id}/events`);
+  check(skillEvents.at(-1)?.status === 'done', `第二个回合应以 done 结束：${JSON.stringify(skillEvents.at(-1))}`);
+  const toolMessage = skillEvents.find((e) => e.type === 'message' && e.message.role === 'tool');
+  check(toolMessage && toolMessage.message.content.includes('# 写周报'), 'skill 正文没有进入工具结果');
+
   await llm.close();
   console.log(`e2e ok：${types.length} 个事件，${turns[0].messages.length} 条消息`);
 }
@@ -128,11 +143,14 @@ async function waitFor(url, timeoutMs = 20_000) {
   }
 }
 
-/** @param {string} method @param {string} url @param {unknown} [body] */
-async function call(method, url, body) {
+/** @param {string} method @param {string} url @param {unknown} [body] @param {Record<string,string>} [headers] */
+async function call(method, url, body, headers = {}) {
   const res = await fetch(url, {
     method,
-    headers: body === undefined ? {} : { 'Content-Type': 'application/json' },
+    headers: {
+      ...headers,
+      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+    },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const data = await res.json();

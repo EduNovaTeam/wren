@@ -44,6 +44,33 @@ export class BackendClient {
   turnContext(turnId) {
     return this.request('GET', `/internal/turns/${turnId}/context`);
   }
+
+  /**
+   * 一个 skill 的正文与附带文件列表。
+   * @param {string} name
+   * @param {AbortSignal} [signal]
+   * @returns {Promise<{ name: string, description: string, body: string, files: string[] }>}
+   */
+  getSkill(name, signal) {
+    return this.request('GET', `/internal/skills/${encodeURIComponent(name)}`, undefined, signal);
+  }
+
+  /**
+   * skill 目录内的一个附带文件。
+   * @param {string} name
+   * @param {string} file  相对路径，例如 references/style.md
+   * @param {AbortSignal} [signal]
+   * @returns {Promise<{ path: string, content: string }>}
+   */
+  getSkillFile(name, file, signal) {
+    const path = file.split('/').map(encodeURIComponent).join('/');
+    return this.request(
+      'GET',
+      `/internal/skills/${encodeURIComponent(name)}/files/${path}`,
+      undefined,
+      signal,
+    );
+  }
 }
 
 export class BackendError extends Error {
