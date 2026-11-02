@@ -46,6 +46,15 @@ export class BackendClient {
   }
 
   /**
+   * 可用的 skill 清单（只有名字与描述）。
+   * @param {AbortSignal} [signal]
+   * @returns {Promise<{ skills: import('./types.js').SkillSummary[] }>}
+   */
+  listSkills(signal) {
+    return this.request('GET', '/internal/skills', undefined, signal);
+  }
+
+  /**
    * 一个 skill 的正文与附带文件列表。
    * @param {string} name
    * @param {AbortSignal} [signal]
