@@ -23,7 +23,7 @@ export const useSkill = {
     },
   },
   timeoutMs: 15_000,
-  async execute({ name, file }, { backend, signal }) {
+  async execute({ name, file }, { backend, sessionId, signal }) {
     const skillName = String(name ?? '').trim();
     const relative = String(file ?? '').trim();
 
@@ -37,6 +37,8 @@ export const useSkill = {
     }
 
     const skill = await backend.getSkill(skillName, signal);
+    // 读过正文就算用上了：记进会话，后续回合继续带上。失败不影响本回合的结果。
+    await backend.activateSkill(sessionId, skill.name, signal).catch(() => {});
     const lines = [`# ${skill.name}`, '', skill.description, '', skill.body];
     if (skill.files?.length) {
       lines.push('', `附带文件（需要时带 file 参数再读）：${skill.files.join('、')}`);

@@ -50,9 +50,10 @@ export const skillsSection = {
 };
 
 /**
- * 用户用 `/skill-name` 点名的 skill，正文直接写进系统提示。
+ * 生效中的 skill，正文直接写进系统提示。
  *
- * 排最后：这一段的存废随用户每条消息变化，靠后能少破坏前面的前缀缓存。
+ * 分两种来源：用户这一条消息点名的，和本会话此前用上、继续生效的。
+ * 排最后：这一段的存废和内容随会话变化，靠后能少破坏前面的前缀缓存。
  * @type {PromptSection}
  */
 export const activeSkillsSection = {
@@ -62,9 +63,15 @@ export const activeSkillsSection = {
     if (!active.length) return null;
     return active
       .map((skill) => {
-        const parts = [`用户指定本回合使用 skill「${skill.name}」（${skill.description}），照它说的做：`, skill.body];
+        const heading =
+          skill.reason === 'session'
+            ? `本会话此前已启用 skill「${skill.name}」（${skill.description}），继续按它说的做：`
+            : `用户指定本回合使用 skill「${skill.name}」（${skill.description}），照它说的做：`;
+        const parts = [heading, skill.body];
         if (skill.files?.length) {
-          parts.push(`附带文件：${skill.files.join('、')}。需要时用 use_skill({ name: '${skill.name}', file }) 读取。`);
+          parts.push(
+            `附带文件：${skill.files.join('、')}。需要时用 use_skill({ name: '${skill.name}', file }) 读取。`,
+          );
         }
         return parts.join('\n\n');
       })

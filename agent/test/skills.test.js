@@ -15,7 +15,7 @@ const SKILL = {
 
 const LIST = [{ name: 'weekly-report', description: '按团队模板撰写个人周报。' }];
 
-/** @param {Partial<{ skill: any, file: any, skills: any[], failure: Error }>} [options] */
+/** @param {Partial<{ skill: any, file: any, skills: any[], failure: Error, activationFailure: Error }>} [options] */
 function fakeBackend(options = {}) {
   return {
     calls: /** @type {any[]} */ ([]),
@@ -36,6 +36,12 @@ function fakeBackend(options = {}) {
       if (options.failure) throw options.failure;
       return options.file ?? { path: file, content: '【周报】模板正文' };
     },
+    /** @param {number} sessionId @param {string} name */
+    async activateSkill(sessionId, name) {
+      this.calls.push(['activate', sessionId, name]);
+      if (options.activationFailure) throw options.activationFailure;
+      return { skills: [name] };
+    },
   };
 }
 
@@ -48,14 +54,29 @@ const ctx = (backend) => ({
   signal: new AbortController().signal,
 });
 
-test('use_skill returns the body and lists attached files', async () => {
+test('use_skill returns the body and marks the skill active for the session', async () => {
   const backend = fakeBackend();
   const text = await useSkill.execute({ name: ' weekly-report ' }, ctx(backend));
   assert.match(text, /# 写周报/);
   assert.match(text, /按团队模板撰写个人周报/);
   assert.match(text, /references\/template\.md/);
-  // name 两端空白要清掉，否则后端按名字查不到
-  assert.deepEqual(backend.calls, [['skill', 'weekly-report']]);
+  // name 两端空白要清掉，否则后端按名字查不到；读完正文要记进会话
+  assert.deepEqual(backend.calls, [
+    ['skill', 'weekly-report'],
+    ['activate', 1, 'weekly-report'],
+  ]);
+});
+
+test('reading an attached file does not re-activate the skill', async () => {
+  const backend = fakeBackend();
+  await useSkill.execute({ name: 'weekly-report', file: 'references/template.md' }, ctx(backend));
+  assert.deepEqual(backend.calls, [['file', 'weekly-report', 'references/template.md']]);
+});
+
+test('a failed activation still returns the body', async () => {
+  const backend = fakeBackend({ activationFailure: new Error('后端挂了') });
+  const text = await useSkill.execute({ name: 'weekly-report' }, ctx(backend));
+  assert.match(text, /# 写周报/);
 });
 
 test('use_skill without a name returns the catalog instead of a body', async () => {
@@ -152,4 +173,24 @@ test('a skill invoked with /name gets its body written into the prompt', () => {
 test('prompt has no active skill section when the user did not name one', () => {
   const prompt = buildSystemPrompt(DEFAULT_SECTIONS, { system_prompt: '', skills: LIST });
   assert.doesNotMatch(prompt, /用户指定本回合使用/);
+});
+
+test('a skill kept from earlier turns is labelled as session-scoped', () => {
+  const prompt = buildSystemPrompt(DEFAULT_SECTIONS, {
+    system_prompt: '',
+    skills: LIST,
+    active_skills: [
+      {
+        name: 'weekly-report',
+        description: '按团队模板撰写个人周报。',
+        body: '# 写周报\n\n先读模板',
+        files: [],
+        allowed_tools: [],
+        reason: 'session',
+      },
+    ],
+  });
+  assert.match(prompt, /本会话此前已启用 skill「weekly-report」/);
+  assert.doesNotMatch(prompt, /用户指定本回合使用/);
+  assert.match(prompt, /先读模板/);
 });

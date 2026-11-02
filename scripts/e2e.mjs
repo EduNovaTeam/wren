@@ -99,6 +99,21 @@ async function main() {
     `点名 skill 的正文没有进入系统提示：${String(system.content).slice(0, 200)}`,
   );
 
+  // 下一回合不再点名，skill 应该还生效
+  llm.push({ text: '继续。' });
+  const continued = await call('POST', `${base}/api/sessions/${session.id}/turns`, { content: '继续' });
+  const continuedEvents = await readSse(`${base}/api/turns/${continued.turn_id}/events`);
+  check(
+    continuedEvents.at(-1)?.status === 'done',
+    `延续回合应以 done 结束：${JSON.stringify(continuedEvents.at(-1))}`,
+  );
+  const continuedSystem = llm.requests.at(-1).messages[0].content;
+  check(
+    continuedSystem.includes('本会话此前已启用 skill「weekly-report」'),
+    '后续回合没有继续带上 skill',
+  );
+  check(continuedSystem.includes('# 写周报'), '后续回合丢了 skill 正文');
+
   await llm.close();
   console.log(`e2e ok：${types.length} 个事件，${turns[0].messages.length} 条消息`);
 }

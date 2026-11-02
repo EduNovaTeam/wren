@@ -55,6 +55,17 @@ export class BackendClient {
   }
 
   /**
+   * 把 skill 记为会话级生效，后续回合继续带上它的正文。
+   * @param {number} sessionId
+   * @param {string} name
+   * @param {AbortSignal} [signal]
+   * @returns {Promise<{ skills: string[] }>}
+   */
+  activateSkill(sessionId, name, signal) {
+    return this.request('POST', `/internal/sessions/${sessionId}/skills`, { name }, signal);
+  }
+
+  /**
    * 一个 skill 的正文与附带文件列表。
    * @param {string} name
    * @param {AbortSignal} [signal]

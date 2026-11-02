@@ -26,13 +26,14 @@
  */
 
 /**
- * 用户用 `/skill-name` 点名的 skill：正文随上下文直接下发，本回合不必再查。
+ * 生效中的 skill：正文随上下文直接下发，本回合不必再查。
  * @typedef {object} ActiveSkill
  * @property {string} name
  * @property {string} description
  * @property {string} body
  * @property {string[]} files
  * @property {string[]} allowed_tools
+ * @property {'invoked'|'session'} reason  invoked=用户这条消息点名的，session=本会话此前用上的
  */
 
 /**
