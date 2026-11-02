@@ -10,7 +10,7 @@ import hmac
 
 from flask import Blueprint, abort, request
 
-from .. import settings, store
+from .. import settings, skills, store
 from . import cfg, db
 
 bp = Blueprint("internal", __name__, url_prefix="/internal")
@@ -34,12 +34,15 @@ def turn_context(turn_id: int):
         abort(409, f"回合已结束（{turn['status']}）")
     current = [t for t in store.list_turns(conn, turn["session_id"]) if t["id"] == turn_id][0]
     user_message = next(m for m in current["messages"] if m["role"] == "user")
+    available = skills.load_skills(skills.skill_roots(cfg()))
     return {
         "session_id": turn["session_id"],
         "turn_id": turn_id,
         "model": settings.get_model(conn),
         "system_prompt": settings.get_system_prompt(conn),
         "tool_switches": settings.get_tool_switches(conn),
+        # 只给名单，正文由 agent 按需通过 /internal/skills/<name> 取，用不到的不占上下文。
+        "skills": [skill.summary() for skill in skills.sorted_skills(available) if skill.valid],
         "history": store.history(conn, turn["session_id"], turn_id),
         "user_message": {"role": "user", "content": user_message["content"]},
     }
