@@ -64,6 +64,36 @@ def delete_session(conn: sqlite3.Connection, session_id: int) -> bool:
     return conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,)).rowcount > 0
 
 
+# ---- session skills -------------------------------------------------------
+
+
+def activate_skill(conn: sqlite3.Connection, session_id: int, name: str) -> None:
+    """把 skill 记为会话级生效。重复调用不改变首次生效的时间。"""
+    conn.execute(
+        "INSERT OR IGNORE INTO session_skills (session_id, skill_name, activated_at)"
+        " VALUES (?, ?, ?)",
+        (session_id, name, utcnow()),
+    )
+
+
+def deactivate_skill(conn: sqlite3.Connection, session_id: int, name: str) -> bool:
+    cur = conn.execute(
+        "DELETE FROM session_skills WHERE session_id = ? AND skill_name = ?",
+        (session_id, name),
+    )
+    return cur.rowcount > 0
+
+
+def session_skills(conn: sqlite3.Connection, session_id: int) -> list[str]:
+    """按生效顺序返回会话里生效中的 skill 名。"""
+    rows = conn.execute(
+        "SELECT skill_name FROM session_skills WHERE session_id = ?"
+        " ORDER BY activated_at, skill_name",
+        (session_id,),
+    ).fetchall()
+    return [row["skill_name"] for row in rows]
+
+
 # ---- turns ----------------------------------------------------------------
 
 

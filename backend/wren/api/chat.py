@@ -69,28 +69,32 @@ def create_turn(session_id: int):
         abort(400, "content 不能为空")
     if len(content) > CONTENT_MAX:
         abort(400, f"消息不能超过 {CONTENT_MAX} 字")
-    _check_invocation(content)
+    invoked = _check_invocation(content)
     try:
         ids = store.start_turn(db(), session_id, content)
     except store.TurnConflict as exc:
         abort(409, str(exc))
+    if invoked:
+        # 点名之后这个 skill 在会话里持续生效，不只是这一个回合
+        store.activate_skill(db(), session_id, invoked)
     runner = TurnRunner(cfg(), session_id, ids["turn_id"], ids["user_message_id"])
     _turns().add(runner)
     runner.start()
     return ids, 201
 
 
-def _check_invocation(content: str) -> None:
-    """消息以 `/skill-name` 开头时，先确认这个 skill 真的能用，别等回合跑起来才发现。"""
+def _check_invocation(content: str) -> str | None:
+    """消息以 `/skill-name` 开头时校验；能用就返回名字，不能用直接 400，别等回合跑起来才发现。"""
     invocation = skills.parse_invocation(content)
     if not invocation:
-        return
+        return None
     name = invocation[0]
     skill = skills.load_skills(skills.skill_roots(cfg())).get(name)
     if skill is None:
         abort(400, f"没有这个 skill：{name}")
     if not skill.valid:
         abort(400, f"skill「{name}」有问题，先修好再用：{'；'.join(skill.problems)}")
+    return name
 
 
 @bp.get("/turns/<int:turn_id>/events")

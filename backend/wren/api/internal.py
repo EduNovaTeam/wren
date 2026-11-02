@@ -43,26 +43,63 @@ def turn_context(turn_id: int):
         "tool_switches": settings.get_tool_switches(conn),
         # 只给名单，正文由 agent 按需通过 /internal/skills/<name> 取，用不到的不占上下文。
         "skills": [skill.summary() for skill in skills.sorted_skills(available) if skill.valid],
-        # 用户用 `/skill-name` 点名的 skill 直接带正文，这一回合不必再查一次。
-        "active_skills": _active_skills(user_message["content"], available),
+        # 用户 `/skill-name` 点名的、以及本会话里已经用上的 skill，正文直接带上。
+        "active_skills": _active_skills(
+            user_message["content"], available, store.session_skills(conn, turn["session_id"])
+        ),
         "history": store.history(conn, turn["session_id"], turn_id),
         "user_message": {"role": "user", "content": user_message["content"]},
     }
 
 
-def _active_skills(text: str, available: dict[str, skills.Skill]) -> list[dict]:
-    invocation = skills.parse_invocation(text)
-    if not invocation:
-        return []
-    skill = available.get(invocation[0])
+@bp.post("/sessions/<int:session_id>/skills")
+def activate_session_skill(session_id: int):
+    """agent 读到某个 skill 的正文后调用：把它在会话里标为生效，后续回合继续带上。"""
+    conn = db()
+    if not store.get_session(conn, session_id):
+        abort(404, "会话不存在")
+    name = (request.get_json(silent=True) or {}).get("name")
+    if not isinstance(name, str) or not skills.NAME_RE.match(name):
+        abort(400, "name 不合规")
+    skill = skills.load_skills(skills.skill_roots(cfg())).get(name)
     if skill is None or not skill.valid:
-        return []
-    return [
-        {
-            "name": skill.name,
-            "description": skill.description,
-            "body": skill.body,
-            "files": skills.list_files(skill),
-            "allowed_tools": list(skill.allowed_tools),
-        }
-    ]
+        abort(404, "skill 不存在或有问题")
+    store.activate_skill(conn, session_id, name)
+    return {"skills": store.session_skills(conn, session_id)}
+
+
+def _active_skills(
+    text: str, available: dict[str, skills.Skill], session_names: list[str]
+) -> list[dict]:
+    """本回合要注入哪些 skill：用户点名的排在前面，其余是会话里生效中的。"""
+    out: list[dict] = []
+    seen: set[str] = set()
+
+    invocation = skills.parse_invocation(text)
+    if invocation:
+        skill = available.get(invocation[0])
+        if skill is not None and skill.valid:
+            out.append(_payload(skill, "invoked"))
+            seen.add(skill.name)
+
+    for name in session_names:
+        if name in seen:
+            continue
+        skill = available.get(name)
+        # skill 可能已经被删掉或改成有问题的，跳过即可，不要让整个回合失败
+        if skill is None or not skill.valid:
+            continue
+        out.append(_payload(skill, "session"))
+        seen.add(name)
+    return out
+
+
+def _payload(skill: skills.Skill, reason: str) -> dict:
+    return {
+        "name": skill.name,
+        "description": skill.description,
+        "body": skill.body,
+        "files": skills.list_files(skill),
+        "allowed_tools": list(skill.allowed_tools),
+        "reason": reason,
+    }

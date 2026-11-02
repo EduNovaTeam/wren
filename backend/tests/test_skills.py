@@ -5,7 +5,8 @@ from pathlib import Path
 import pytest
 from conftest import TOKEN, read_sse
 
-from wren import skills
+from wren import skills, store
+from wren.db import connect
 
 H = {"X-Wren-Internal-Token": TOKEN}
 REPO_SKILLS = Path(__file__).resolve().parents[2] / "skills"
@@ -276,3 +277,85 @@ def _cfg(data_dir: Path):
     from wren.config import Config
 
     return Config(data_dir=data_dir, agent_url="http://127.0.0.1:1", internal_token=TOKEN)
+
+
+# ---- 跨回合继续生效 ----------------------------------------------------------
+
+
+def _finish(client, turn_id: int):
+    return read_sse(client.get(f"/api/turns/{turn_id}/events"))
+
+
+def _open_turn(client, sid: int, content: str) -> int:
+    """开一个卡住的回合，方便在回合进行中查上下文。"""
+    created = client.post(f"/api/sessions/{sid}/turns", json={"content": content})
+    return created.get_json()["turn_id"]
+
+
+def test_invoked_skill_stays_active_in_later_turns(client, agent, builtin_root):
+    write_skill(
+        builtin_root, "weekly-report", "name: weekly-report\ndescription: 写周报", body="# 写周报"
+    )
+    sid = client.post("/api/sessions").get_json()["id"]
+
+    agent.script = [{"type": "turn_end", "status": "done"}]
+    first = client.post(f"/api/sessions/{sid}/turns", json={"content": "/weekly-report 写周报"})
+    _finish(client, first.get_json()["turn_id"])
+
+    agent.script = [{"type": "_hold"}, {"type": "turn_end", "status": "done"}]
+    turn_id = _open_turn(client, sid, "继续")
+
+    ctx = client.get(f"/internal/turns/{turn_id}/context", headers=H).get_json()
+    assert [s["name"] for s in ctx["active_skills"]] == ["weekly-report"]
+    # 来源是「会话里已生效」，不是「这条消息点名」
+    assert ctx["active_skills"][0]["reason"] == "session"
+    assert "写周报" in ctx["active_skills"][0]["body"]
+
+    agent.released.set()
+    _finish(client, turn_id)
+
+
+def test_activation_is_idempotent_and_rejects_unknown(client, builtin_root):
+    write_skill(builtin_root, "good", "name: good\ndescription: 正常")
+    sid = client.post("/api/sessions").get_json()["id"]
+
+    first = client.post(f"/internal/sessions/{sid}/skills", json={"name": "good"}, headers=H)
+    assert first.status_code == 200
+    assert first.get_json()["skills"] == ["good"]
+    again = client.post(f"/internal/sessions/{sid}/skills", json={"name": "good"}, headers=H)
+    assert again.get_json()["skills"] == ["good"]
+
+    unknown = client.post(f"/internal/sessions/{sid}/skills", json={"name": "nope"}, headers=H)
+    assert unknown.status_code == 404
+    missing = client.post("/internal/sessions/9999/skills", json={"name": "good"}, headers=H)
+    assert missing.status_code == 404
+
+
+def test_skill_that_broke_after_activation_is_skipped(client, agent, builtin_root):
+    directory = write_skill(builtin_root, "good", "name: good\ndescription: 正常", body="# 正文")
+    sid = client.post("/api/sessions").get_json()["id"]
+    client.post(f"/internal/sessions/{sid}/skills", json={"name": "good"}, headers=H)
+
+    (directory / "SKILL.md").write_text("---\nname: good\n---\n\n正文\n", encoding="utf-8")
+    agent.script = [{"type": "_hold"}, {"type": "turn_end", "status": "done"}]
+    turn_id = _open_turn(client, sid, "继续")
+
+    ctx = client.get(f"/internal/turns/{turn_id}/context", headers=H).get_json()
+    assert ctx["active_skills"] == []
+
+    agent.released.set()
+    _finish(client, turn_id)
+
+
+def test_deleting_session_drops_its_skills(client, cfg, builtin_root):
+    write_skill(builtin_root, "good", "name: good\ndescription: 正常")
+    sid = client.post("/api/sessions").get_json()["id"]
+    client.post(f"/internal/sessions/{sid}/skills", json={"name": "good"}, headers=H)
+
+    assert client.delete(f"/api/sessions/{sid}").status_code == 204
+
+    conn = connect(cfg.db_path)
+    try:
+        assert store.session_skills(conn, sid) == []
+    finally:
+        conn.close()
