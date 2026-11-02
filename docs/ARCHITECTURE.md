@@ -76,7 +76,8 @@ skill 是「怎么把一类事做好」的做法，写在 `skills/<名字>/SKILL
 - **附带文件**：说明里引用的模板、规范通过 `use_skill({ name, file })` 读，落到 `GET /internal/skills/<name>/files/<路径>`。
 - **不越界**：读取时按 realpath 校验，路径必须留在该 skill 目录内；指向目录外的符号链接不算它的内容。
 - **发现放在后端**：设置页要列出全部 skill 与问题，而 agent 不保存状态，所以由后端解析文件、校验 frontmatter，有问题的 skill 不下发给模型。
-- 系统提示里的 skill 清单排在最后一段（`context.js` 的 `skillsSection`），因为它会随安装变化，靠后能少破坏前缀缓存。
+- **主动指定**：消息以 `/skill-name` 开头时，后端在创建回合前解析并校验（不存在或有问题的直接 400，不留下半截回合），回合上下文带上该 skill 的正文（`active_skills`），系统提示里直接出现，模型本回合不必再查一次。用户原样输入的内容照旧落库，前端不用改写显示。命令后必须跟空白或行尾，所以 `/usr/bin/env …` 不会被误判成调用 `usr`。
+- 系统提示里与 skill 有关的两段都排在最后（`context.js` 的 `skillsSection` 与 `activeSkillsSection`）：前者是固定文案，后者随每条消息变化，靠后能少破坏前缀缓存。
 
 ## 扩展点
 
