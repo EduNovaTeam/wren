@@ -43,6 +43,26 @@ def turn_context(turn_id: int):
         "tool_switches": settings.get_tool_switches(conn),
         # 只给名单，正文由 agent 按需通过 /internal/skills/<name> 取，用不到的不占上下文。
         "skills": [skill.summary() for skill in skills.sorted_skills(available) if skill.valid],
+        # 用户用 `/skill-name` 点名的 skill 直接带正文，这一回合不必再查一次。
+        "active_skills": _active_skills(user_message["content"], available),
         "history": store.history(conn, turn["session_id"], turn_id),
         "user_message": {"role": "user", "content": user_message["content"]},
     }
+
+
+def _active_skills(text: str, available: dict[str, skills.Skill]) -> list[dict]:
+    invocation = skills.parse_invocation(text)
+    if not invocation:
+        return []
+    skill = available.get(invocation[0])
+    if skill is None or not skill.valid:
+        return []
+    return [
+        {
+            "name": skill.name,
+            "description": skill.description,
+            "body": skill.body,
+            "files": skills.list_files(skill),
+            "allowed_tools": list(skill.allowed_tools),
+        }
+    ]

@@ -20,6 +20,8 @@ from .config import Config
 
 # skill 名会出现在工具参数和 URL 里，限制成小写字母、数字和短横线。
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+# 消息开头的 `/名字`，名字后必须是空白或行尾
+COMMAND_RE = re.compile(r"^/([a-z0-9][a-z0-9-]{0,63})(?=\s|$)")
 SKILL_FILE = "SKILL.md"
 DESCRIPTION_MAX = 1024
 FILE_MAX_BYTES = 1_000_000
@@ -62,6 +64,19 @@ class Skill:
 def skill_roots(cfg: Config) -> list[tuple[str, Path]]:
     """按优先级从低到高返回来源，同名时后面的覆盖前面的。"""
     return [("builtin", BUILTIN_DIR), ("user", cfg.data_dir / "skills")]
+
+
+def parse_invocation(text: str) -> tuple[str, str] | None:
+    """解析消息开头的 `/skill-name`。
+
+    返回 `(名字, 去掉命令后的正文)`；不像调用时返回 `None`。
+    要求名字后面紧跟空白或行尾，所以 `/usr/bin/env 是什么` 不会被当成而调用 `usr`。
+    """
+    stripped = text.lstrip()
+    match = COMMAND_RE.match(stripped)
+    if not match:
+        return None
+    return match.group(1), stripped[match.end() :].strip()
 
 
 def load_skills(roots: list[tuple[str, Path]]) -> dict[str, Skill]:

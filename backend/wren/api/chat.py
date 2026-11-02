@@ -6,7 +6,7 @@ import json
 
 from flask import Blueprint, Response, abort, current_app, stream_with_context
 
-from .. import store
+from .. import skills, store
 from ..turns import TurnRegistry, TurnRunner
 from . import cfg, db, json_body
 
@@ -69,6 +69,7 @@ def create_turn(session_id: int):
         abort(400, "content 不能为空")
     if len(content) > CONTENT_MAX:
         abort(400, f"消息不能超过 {CONTENT_MAX} 字")
+    _check_invocation(content)
     try:
         ids = store.start_turn(db(), session_id, content)
     except store.TurnConflict as exc:
@@ -77,6 +78,19 @@ def create_turn(session_id: int):
     _turns().add(runner)
     runner.start()
     return ids, 201
+
+
+def _check_invocation(content: str) -> None:
+    """消息以 `/skill-name` 开头时，先确认这个 skill 真的能用，别等回合跑起来才发现。"""
+    invocation = skills.parse_invocation(content)
+    if not invocation:
+        return
+    name = invocation[0]
+    skill = skills.load_skills(skills.skill_roots(cfg())).get(name)
+    if skill is None:
+        abort(400, f"没有这个 skill：{name}")
+    if not skill.valid:
+        abort(400, f"skill「{name}」有问题，先修好再用：{'；'.join(skill.problems)}")
 
 
 @bp.get("/turns/<int:turn_id>/events")

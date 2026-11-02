@@ -199,6 +199,79 @@ def test_turn_context_carries_skill_summaries(client, agent, builtin_root):
     read_sse(client.get(f"/api/turns/{turn_id}/events"))
 
 
+# ---- `/skill-name` 指定使用 -------------------------------------------------
+
+
+def test_parse_invocation_only_matches_a_command_prefix():
+    assert skills.parse_invocation("/weekly-report 帮我写周报") == ("weekly-report", "帮我写周报")
+    assert skills.parse_invocation("  /weekly-report") == ("weekly-report", "")
+    # 名字后面不是空白，说明是路径而不是命令
+    assert skills.parse_invocation("/usr/bin/env 是什么") is None
+    assert skills.parse_invocation("你好 /weekly-report") is None
+    assert skills.parse_invocation("/Weekly 大小写") is None
+
+
+def test_invocation_loads_skill_body_into_context(client, agent, builtin_root):
+    write_skill(
+        builtin_root,
+        "weekly-report",
+        "name: weekly-report\ndescription: 写周报",
+        body="# 写周报\n先读模板",
+    )
+    agent.script = [{"type": "_hold"}, {"type": "turn_end", "status": "done"}]
+    sid = client.post("/api/sessions").get_json()["id"]
+
+    response = client.post(
+        f"/api/sessions/{sid}/turns", json={"content": "/weekly-report 本周做了 A"}
+    )
+    assert response.status_code == 201
+    turn_id = response.get_json()["turn_id"]
+
+    ctx = client.get(f"/internal/turns/{turn_id}/context", headers=H).get_json()
+    assert [s["name"] for s in ctx["active_skills"]] == ["weekly-report"]
+    assert "先读模板" in ctx["active_skills"][0]["body"]
+    # 用户原样输入的内容照旧保留，前端不必改写显示
+    assert ctx["user_message"]["content"] == "/weekly-report 本周做了 A"
+
+    agent.released.set()
+    read_sse(client.get(f"/api/turns/{turn_id}/events"))
+
+
+def test_plain_message_has_no_active_skills(client, agent, builtin_root):
+    write_skill(builtin_root, "weekly-report", "name: weekly-report\ndescription: 写周报")
+    agent.script = [{"type": "_hold"}, {"type": "turn_end", "status": "done"}]
+    sid = client.post("/api/sessions").get_json()["id"]
+    turn_id = client.post(f"/api/sessions/{sid}/turns", json={"content": "写个周报"}).get_json()[
+        "turn_id"
+    ]
+
+    ctx = client.get(f"/internal/turns/{turn_id}/context", headers=H).get_json()
+    assert ctx["active_skills"] == []
+
+    agent.released.set()
+    read_sse(client.get(f"/api/turns/{turn_id}/events"))
+
+
+def test_invocation_of_unknown_skill_is_rejected_before_the_turn_starts(client, builtin_root):
+    write_skill(builtin_root, "weekly-report", "name: weekly-report\ndescription: 写周报")
+    sid = client.post("/api/sessions").get_json()["id"]
+
+    response = client.post(f"/api/sessions/{sid}/turns", json={"content": "/nope 做点什么"})
+    assert response.status_code == 400
+    assert "没有这个 skill" in response.get_json()["error"]
+    # 回合没有创建，所以不存在半截记录
+    assert client.get(f"/api/sessions/{sid}/turns").get_json()["turns"] == []
+
+
+def test_invocation_of_broken_skill_is_rejected_with_the_reason(client, builtin_root):
+    write_skill(builtin_root, "broken", "name: broken")  # 缺 description
+    sid = client.post("/api/sessions").get_json()["id"]
+
+    response = client.post(f"/api/sessions/{sid}/turns", json={"content": "/broken 试试"})
+    assert response.status_code == 400
+    assert "缺少 description" in response.get_json()["error"]
+
+
 def _cfg(data_dir: Path):
     from wren.config import Config
 
