@@ -86,6 +86,27 @@ def test_user_skills_override_builtin(tmp_path, builtin_root):
     assert found["same"].source == "user"
 
 
+def test_invalid_user_skill_still_overrides_builtin(tmp_path, builtin_root):
+    """同名一律以用户的为准：本地版本写坏了也不回退到内置版。
+
+    这是有意选择，不是遗漏。坏掉的用户版本会被判为无效、不下发给模型，
+    所以表现是该 skill 从模型侧消失；问题原因在 /api/skills 里可见。
+    """
+    write_skill(builtin_root, "same", "name: same\ndescription: 内置版本")
+    write_skill(tmp_path / "skills", "same", "name: same")  # 缺 description
+    found = skills.load_skills(skills.skill_roots(_cfg(tmp_path)))
+    assert found["same"].source == "user"
+    assert found["same"].valid is False
+
+
+def test_user_skill_is_matched_by_frontmatter_name_not_directory(tmp_path, builtin_root):
+    write_skill(builtin_root, "same", "name: same\ndescription: 内置版本")
+    write_skill(tmp_path / "skills", "same", "name: other\ndescription: 目录同名但改了 name")
+    found = skills.load_skills(skills.skill_roots(_cfg(tmp_path)))
+    assert found["same"].source == "builtin"
+    assert found["other"].valid is False  # name 与目录名不一致
+
+
 def test_skill_without_skill_md_is_ignored(builtin_root):
     (builtin_root / "empty").mkdir()
     assert skills.load_skills([("builtin", builtin_root)]) == {}
