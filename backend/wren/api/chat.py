@@ -6,7 +6,7 @@ import json
 
 from flask import Blueprint, Response, abort, current_app, stream_with_context
 
-from .. import skills, store
+from .. import settings, skills, store
 from ..turns import TurnRegistry, TurnRunner
 from . import cfg, db, json_body
 
@@ -94,6 +94,8 @@ def _check_invocation(content: str) -> str | None:
         abort(400, f"没有这个 skill：{name}")
     if not skill.valid:
         abort(400, f"skill「{name}」有问题，先修好再用：{'；'.join(skill.problems)}")
+    if not skills.is_enabled(skill, settings.get_skill_switches(db())):
+        abort(400, f"skill「{name}」已停用，先到设置里启用")
     return name
 
 

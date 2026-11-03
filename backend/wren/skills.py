@@ -58,6 +58,8 @@ class Skill:
             "allowed_tools": list(self.allowed_tools),
             "valid": self.valid,
             "problems": list(self.problems),
+            # 设置页要用它指出该改哪个文件
+            "path": str(self.directory),
         }
 
 
@@ -96,6 +98,20 @@ def load_skills(roots: list[tuple[str, Path]]) -> dict[str, Skill]:
 
 def sorted_skills(skills: dict[str, Skill]) -> list[Skill]:
     return sorted(skills.values(), key=lambda s: s.name)
+
+
+def is_enabled(skill: Skill, switches: dict[str, bool]) -> bool:
+    """用户在设置页停用过的 skill 不再交给模型。没配置过的按启用处理。"""
+    return switches.get(skill.name, True)
+
+
+def usable(skill: Skill, switches: dict[str, bool]) -> bool:
+    """能交给模型的条件：自身没问题，且用户没有停用它。
+
+    会话里已经生效的 skill 被停用后不会从 session_skills 里删掉——停用只是让它暂时
+    不参与，重新启用时之前用过的那些立刻恢复，用户不用再点名一次。
+    """
+    return skill.valid and is_enabled(skill, switches)
 
 
 def list_files(skill: Skill) -> list[str]:

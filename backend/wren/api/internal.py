@@ -35,6 +35,7 @@ def turn_context(turn_id: int):
     current = [t for t in store.list_turns(conn, turn["session_id"]) if t["id"] == turn_id][0]
     user_message = next(m for m in current["messages"] if m["role"] == "user")
     available = skills.load_skills(skills.skill_roots(cfg()))
+    switches = settings.get_skill_switches(conn)
     return {
         "session_id": turn["session_id"],
         "turn_id": turn_id,
@@ -42,10 +43,17 @@ def turn_context(turn_id: int):
         "system_prompt": settings.get_system_prompt(conn),
         "tool_switches": settings.get_tool_switches(conn),
         # 只给名单，正文由 agent 按需通过 /internal/skills/<name> 取，用不到的不占上下文。
-        "skills": [skill.summary() for skill in skills.sorted_skills(available) if skill.valid],
+        "skills": [
+            skill.summary()
+            for skill in skills.sorted_skills(available)
+            if skills.usable(skill, switches)
+        ],
         # 用户 `/skill-name` 点名的、以及本会话里已经用上的 skill，正文直接带上。
         "active_skills": _active_skills(
-            user_message["content"], available, store.session_skills(conn, turn["session_id"])
+            user_message["content"],
+            available,
+            store.session_skills(conn, turn["session_id"]),
+            switches,
         ),
         "history": store.history(conn, turn["session_id"], turn_id),
         "user_message": {"role": "user", "content": user_message["content"]},
@@ -62,14 +70,17 @@ def activate_session_skill(session_id: int):
     if not isinstance(name, str) or not skills.NAME_RE.match(name):
         abort(400, "name 不合规")
     skill = skills.load_skills(skills.skill_roots(cfg())).get(name)
-    if skill is None or not skill.valid:
-        abort(404, "skill 不存在或有问题")
+    if skill is None or not skills.usable(skill, settings.get_skill_switches(conn)):
+        abort(404, "skill 不存在、有问题或已停用")
     store.activate_skill(conn, session_id, name)
     return {"skills": store.session_skills(conn, session_id)}
 
 
 def _active_skills(
-    text: str, available: dict[str, skills.Skill], session_names: list[str]
+    text: str,
+    available: dict[str, skills.Skill],
+    session_names: list[str],
+    switches: dict[str, bool],
 ) -> list[dict]:
     """本回合要注入哪些 skill：用户点名的排在前面，其余是会话里生效中的。"""
     out: list[dict] = []
@@ -78,7 +89,7 @@ def _active_skills(
     invocation = skills.parse_invocation(text)
     if invocation:
         skill = available.get(invocation[0])
-        if skill is not None and skill.valid:
+        if skill is not None and skills.usable(skill, switches):
             out.append(_payload(skill, "invoked"))
             seen.add(skill.name)
 
@@ -86,8 +97,8 @@ def _active_skills(
         if name in seen:
             continue
         skill = available.get(name)
-        # skill 可能已经被删掉或改成有问题的，跳过即可，不要让整个回合失败
-        if skill is None or not skill.valid:
+        # skill 可能已经被删掉、改坏或被用户停用，跳过即可，不要让整个回合失败
+        if skill is None or not skills.usable(skill, switches):
             continue
         out.append(_payload(skill, "session"))
         seen.add(name)

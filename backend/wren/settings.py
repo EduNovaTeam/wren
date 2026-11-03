@@ -1,4 +1,4 @@
-"""用户设置：模型连接、工具开关、自定义系统提示。存放在 settings 表（data/wren.db）。
+"""用户设置：模型连接、工具开关、skill 开关、自定义系统提示。存放在 settings 表（data/wren.db）。
 
 api_key 只在内部接口里原样交给 agent；对外接口只返回是否已设置和末四位。
 """
@@ -109,6 +109,22 @@ def update_tool_switches(conn: sqlite3.Connection, patch: dict[str, Any]) -> dic
         raise SettingsError("工具开关格式应为 {工具名: true/false}")
     switches = {**get_tool_switches(conn), **patch}
     _put(conn, "tools", switches)
+    return switches
+
+
+# ---- skills ---------------------------------------------------------------
+
+
+def get_skill_switches(conn: sqlite3.Connection) -> dict[str, bool]:
+    """skill 开关。没出现在这里的 skill 按启用处理，新增的 skill 不用改配置。"""
+    return dict(_get(conn, "skills") or {})
+
+
+def update_skill_switches(conn: sqlite3.Connection, patch: dict[str, Any]) -> dict[str, bool]:
+    if not all(isinstance(k, str) and isinstance(v, bool) for k, v in patch.items()):
+        raise SettingsError("skill 开关格式应为 {skill 名: true/false}")
+    switches = {**get_skill_switches(conn), **patch}
+    _put(conn, "skills", switches)
     return switches
 
 

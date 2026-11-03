@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from conftest import TOKEN, read_sse
 
-from wren import skills, store
+from wren import settings, skills, store
 from wren.db import connect
 
 H = {"X-Wren-Internal-Token": TOKEN}
@@ -357,5 +357,113 @@ def test_deleting_session_drops_its_skills(client, cfg, builtin_root):
     conn = connect(cfg.db_path)
     try:
         assert store.session_skills(conn, sid) == []
+    finally:
+        conn.close()
+
+
+# ---- 启用与停用 --------------------------------------------------------------
+
+
+def test_public_list_reports_enabled_state_and_path(client, builtin_root):
+    write_skill(builtin_root, "good", "name: good\ndescription: 正常")
+    listed = {s["name"]: s for s in client.get("/api/skills").get_json()["skills"]}
+    assert listed["good"]["enabled"] is True
+    # 设置页要能指出该改哪个目录
+    assert listed["good"]["path"].endswith("good")
+
+
+def test_disable_hides_skill_from_the_model_but_keeps_it_listed(client, builtin_root):
+    write_skill(builtin_root, "good", "name: good\ndescription: 正常")
+
+    off = client.put("/api/skills/good", json={"enabled": False})
+    assert off.status_code == 200
+    assert off.get_json() == {"name": "good", "enabled": False}
+
+    assert client.get("/internal/skills", headers=H).get_json()["skills"] == []
+    assert client.get("/internal/skills/good", headers=H).status_code == 404
+    # 设置页仍然看得到它，只是状态为停用
+    listed = {s["name"]: s for s in client.get("/api/skills").get_json()["skills"]}
+    assert listed["good"]["enabled"] is False
+
+    client.put("/api/skills/good", json={"enabled": True})
+    names = [s["name"] for s in client.get("/internal/skills", headers=H).get_json()["skills"]]
+    assert names == ["good"]
+
+
+def test_disabled_skill_cannot_be_invoked(client, builtin_root):
+    write_skill(builtin_root, "good", "name: good\ndescription: 正常")
+    client.put("/api/skills/good", json={"enabled": False})
+    sid = client.post("/api/sessions").get_json()["id"]
+
+    response = client.post(f"/api/sessions/{sid}/turns", json={"content": "/good 试试"})
+    assert response.status_code == 400
+    assert "已停用" in response.get_json()["error"]
+    assert client.get(f"/api/sessions/{sid}/turns").get_json()["turns"] == []
+
+
+def test_disabled_skill_drops_out_of_the_turn_context(client, agent, builtin_root):
+    write_skill(builtin_root, "good", "name: good\ndescription: 正常", body="# 正文")
+    sid = client.post("/api/sessions").get_json()["id"]
+    client.post(f"/internal/sessions/{sid}/skills", json={"name": "good"}, headers=H)
+    client.put("/api/skills/good", json={"enabled": False})
+
+    agent.script = [{"type": "_hold"}, {"type": "turn_end", "status": "done"}]
+    turn_id = _open_turn(client, sid, "继续")
+
+    ctx = client.get(f"/internal/turns/{turn_id}/context", headers=H).get_json()
+    assert ctx["skills"] == []
+    assert ctx["active_skills"] == []
+
+    agent.released.set()
+    _finish(client, turn_id)
+
+
+def test_reenabling_restores_the_session_skill(client, cfg, builtin_root):
+    write_skill(builtin_root, "good", "name: good\ndescription: 正常", body="# 正文")
+    sid = client.post("/api/sessions").get_json()["id"]
+    client.post(f"/internal/sessions/{sid}/skills", json={"name": "good"}, headers=H)
+
+    client.put("/api/skills/good", json={"enabled": False})
+    client.put("/api/skills/good", json={"enabled": True})
+
+    # 停用只是暂时不参与，不该把会话里用过的 skill 忘掉
+    conn = connect(cfg.db_path)
+    try:
+        assert store.session_skills(conn, sid) == ["good"]
+    finally:
+        conn.close()
+
+
+def test_internal_activation_rejects_a_disabled_skill(client, builtin_root):
+    write_skill(builtin_root, "good", "name: good\ndescription: 正常")
+    sid = client.post("/api/sessions").get_json()["id"]
+    client.put("/api/skills/good", json={"enabled": False})
+
+    response = client.post(f"/internal/sessions/{sid}/skills", json={"name": "good"}, headers=H)
+    assert response.status_code == 404
+
+
+def test_broken_skill_cannot_be_enabled(client, builtin_root):
+    write_skill(builtin_root, "bad", "name: bad")  # 缺 description
+    response = client.put("/api/skills/bad", json={"enabled": True})
+    assert response.status_code == 400
+    assert "缺少 description" in response.get_json()["error"]
+
+
+def test_toggle_validates_name_and_body(client, builtin_root):
+    write_skill(builtin_root, "good", "name: good\ndescription: 正常")
+    assert client.put("/api/skills/nope", json={"enabled": True}).status_code == 404
+    assert client.put("/api/skills/Not_Valid", json={"enabled": True}).status_code == 404
+    assert client.put("/api/skills/good", json={"enabled": "yes"}).status_code == 400
+    assert client.put("/api/skills/good", json={}).status_code == 400
+
+
+def test_disable_is_persisted_in_settings(client, cfg, builtin_root):
+    write_skill(builtin_root, "good", "name: good\ndescription: 正常")
+    client.put("/api/skills/good", json={"enabled": False})
+
+    conn = connect(cfg.db_path)
+    try:
+        assert settings.get_skill_switches(conn) == {"good": False}
     finally:
         conn.close()
