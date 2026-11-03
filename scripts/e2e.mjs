@@ -109,7 +109,8 @@ async function main() {
   );
   const continuedSystem = llm.requests.at(-1).messages[0].content;
   check(
-    continuedSystem.includes('本会话此前已启用 skill「weekly-report」'),
+    continuedSystem.includes('本会话已启用 skill「weekly-report」')
+      && continuedSystem.includes('它对之后每条消息都生效'),
     '后续回合没有继续带上 skill',
   );
   check(continuedSystem.includes('# 写周报'), '后续回合丢了 skill 正文');

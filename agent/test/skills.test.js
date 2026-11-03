@@ -190,7 +190,10 @@ test('a skill kept from earlier turns is labelled as session-scoped', () => {
       },
     ],
   });
-  assert.match(prompt, /本会话此前已启用 skill「weekly-report」/);
+  assert.match(prompt, /本会话已启用 skill「weekly-report」/);
+  // 必须说清之后每条消息都算数，否则模型会按 skill 正文里的适用条件把它当成「只在命令后生效」
+  assert.match(prompt, /它对之后每条消息都生效/);
+  assert.match(prompt, /不必再写 \/weekly-report/);
   assert.doesNotMatch(prompt, /用户指定本回合使用/);
   assert.match(prompt, /先读模板/);
 });

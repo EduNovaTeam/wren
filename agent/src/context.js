@@ -53,6 +53,10 @@ export const skillsSection = {
  * 生效中的 skill，正文直接写进系统提示。
  *
  * 分两种来源：用户这一条消息点名的，和本会话此前用上、继续生效的。
+ * 后者的措辞必须说清「之后每条消息都算数」——只说「继续按它说的做」时，
+ * 模型会退回按 skill 正文里的适用条件判断（例如翻译类 skill 要求「用户要求翻译时」），
+ * 于是没有命令前缀的下一句就被当成普通聊天，看起来像是没生效。
+ *
  * 排最后：这一段的存废和内容随会话变化，靠后能少破坏前面的前缀缓存。
  * @type {PromptSection}
  */
@@ -63,11 +67,18 @@ export const activeSkillsSection = {
     if (!active.length) return null;
     return active
       .map((skill) => {
-        const heading =
+        const parts =
           skill.reason === 'session'
-            ? `本会话此前已启用 skill「${skill.name}」（${skill.description}），继续按它说的做：`
-            : `用户指定本回合使用 skill「${skill.name}」（${skill.description}），照它说的做：`;
-        const parts = [heading, skill.body];
+            ? [
+                `本会话已启用 skill「${skill.name}」（${skill.description}），它对之后每条消息都生效。`,
+                `不必再写 /${skill.name}，也不要把「消息里没有这个命令」当成它不适用的理由；`
+                  + '用户明确说停用、或明确要你去做别的事时才放下。',
+                skill.body,
+              ]
+            : [
+                `用户指定本回合使用 skill「${skill.name}」（${skill.description}），照它说的做：`,
+                skill.body,
+              ];
         if (skill.files?.length) {
           parts.push(
             `附带文件：${skill.files.join('、')}。需要时用 use_skill({ name: '${skill.name}', file }) 读取。`,
