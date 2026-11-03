@@ -12,6 +12,8 @@ const router = useRouter();
 
 /** @type {import('vue').Ref<any[]>} */
 const turns = ref([]);
+/** 本会话里正在生效的 skill：模型读过或用户 /点名过的，会一直生效到用户退出。 */
+const activeSkills = ref([]);
 const input = ref('');
 const error = ref('');
 const loading = ref(false);
@@ -37,9 +39,30 @@ onMounted(async () => {
     loading.value = false;
     scrollToBottom();
   }
+  loadActiveSkills();
 });
 
 onBeforeUnmount(() => subscription?.close());
+
+/** 回合结束时刷新：模型可能在这个回合里读了一个新 skill，或者用户刚 /点名过。 */
+async function loadActiveSkills() {
+  if (!props.sessionId) return;
+  try {
+    activeSkills.value = (await api.listSessionSkills(props.sessionId)).skills;
+  } catch {
+    // 列表拿不到不影响对话，安静失败
+  }
+}
+
+/** @param {string} name */
+async function leaveSkill(name) {
+  try {
+    const data = await api.leaveSessionSkill(props.sessionId, name);
+    activeSkills.value = data.skills;
+  } catch (err) {
+    error.value = err.message;
+  }
+}
 
 /**
  * @param {number} turnId
@@ -54,7 +77,10 @@ function follow(turnId, userText, replace = false) {
   subscription = subscribeTurn(turnId, (event) => {
     applyEvent(view, event);
     scrollToBottom();
-    if (event.type === 'turn_end') refreshSessions();
+    if (event.type === 'turn_end') {
+      refreshSessions();
+      loadActiveSkills();
+    }
   });
   subscription.done.catch((err) => {
     view.status = 'failed';
@@ -80,6 +106,7 @@ async function send() {
     }
     follow(turnId, text);
     refreshSessions();
+    loadActiveSkills();
   } catch (err) {
     error.value = err.message;
   } finally {
@@ -125,6 +152,13 @@ function scrollToBottom() {
       </div>
     </div>
     <div class="composer">
+      <div v-if="activeSkills.length" class="skill-chips">
+        <span class="muted small">生效中</span>
+        <span v-for="s in activeSkills" :key="s.name" class="skill-chip" :title="s.description">
+          <code>{{ s.name }}</code>
+          <button class="chip-close" :aria-label="`退出 ${s.name}`" @click="leaveSkill(s.name)">×</button>
+        </span>
+      </div>
       <p v-if="error" class="error small">{{ error }}</p>
       <div class="composer-box">
         <textarea

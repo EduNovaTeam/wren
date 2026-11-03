@@ -44,6 +44,9 @@ export const api = {
   listTurns: (sessionId) => request('GET', `/api/sessions/${sessionId}/turns`),
   createTurn: (sessionId, content) => request('POST', `/api/sessions/${sessionId}/turns`, { content }),
   stopTurn: (turnId) => request('POST', `/api/turns/${turnId}/stop`),
+  listSessionSkills: (sessionId) => request('GET', `/api/sessions/${sessionId}/skills`),
+  leaveSessionSkill: (sessionId, name) =>
+    request('DELETE', `/api/sessions/${sessionId}/skills/${encodeURIComponent(name)}`),
 
   getModel: () => request('GET', '/api/settings/model'),
   putModel: (patch) => request('PUT', '/api/settings/model', patch),

@@ -77,6 +77,10 @@ textarea { resize: vertical; width: 100%; }
 .composer { border-top: 1px solid var(--border); padding: 12px 20px 16px; }
 .composer-box { max-width: 820px; margin: 0 auto; display: flex; gap: 8px; align-items: flex-end; }
 .composer .error { max-width: 820px; margin: 0 auto 6px; }
+.skill-chips { max-width: 820px; margin: 0 auto 8px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.skill-chip { display: inline-flex; align-items: center; gap: 2px; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 0 2px 0 9px; font-size: 13px; }
+.skill-chip .chip-close { border: none; background: none; color: var(--muted); padding: 0 5px; line-height: 1.4; font-size: 15px; border-radius: 50%; }
+.skill-chip .chip-close:hover { color: var(--danger); background: #fff; }
 
 .settings { display: flex; height: 100%; }
 .settings-nav { width: 180px; border-right: 1px solid var(--border); padding: 20px 12px; display: flex; flex-direction: column; gap: 2px; }
