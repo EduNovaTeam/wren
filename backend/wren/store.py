@@ -114,6 +114,19 @@ def session_skills(conn: sqlite3.Connection, session_id: int) -> list[str]:
     return [row["skill_name"] for row in rows]
 
 
+def suppressed_skills(conn: sqlite3.Connection, session_id: int) -> list[str]:
+    """用户在这个会话里退出过的 skill。
+
+    这些 skill 连清单都不该出现：否则模型翻到它、读一遍正文，这个回合又照着做了，
+    用户点的退出等于没点。
+    """
+    rows = conn.execute(
+        "SELECT skill_name FROM session_skills WHERE session_id = ? AND suppressed_at IS NOT NULL",
+        (session_id,),
+    ).fetchall()
+    return [row["skill_name"] for row in rows]
+
+
 # ---- turns ----------------------------------------------------------------
 
 

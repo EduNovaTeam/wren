@@ -573,3 +573,57 @@ def test_session_skill_endpoints_need_a_real_session(client, builtin_root):
     # 退出一个没生效过的 skill 不算错：用户要的结果（它不生效）已经成立
     assert client.delete(f"/api/sessions/{sid}/skills/good").status_code == 200
     assert client.delete(f"/api/sessions/{sid}/skills/Not_Valid").status_code == 404
+
+
+def test_left_skill_disappears_from_the_agent_side_too(client, builtin_root):
+    """只挡住系统提示的注入不够：模型还能自己翻清单、读正文，那等于没退出。"""
+    write_skill(builtin_root, "weekly-report", "name: weekly-report\ndescription: 写周报")
+    write_skill(builtin_root, "other", "name: other\ndescription: 另一个")
+    sid = client.post("/api/sessions").get_json()["id"]
+    client.post(f"/internal/sessions/{sid}/skills", json={"name": "weekly-report"}, headers=H)
+    client.delete(f"/api/sessions/{sid}/skills/weekly-report")
+
+    # 不带会话：照旧全部可见（别的会话、以及没有会话的调用方）
+    everything = [s["name"] for s in client.get("/internal/skills", headers=H).get_json()["skills"]]
+    assert everything == ["other", "weekly-report"]
+
+    # 带上会话：清单里没有它，正文和附带文件也读不到
+    listed = client.get(f"/internal/skills?session={sid}", headers=H).get_json()["skills"]
+    assert [s["name"] for s in listed] == ["other"]
+    detail = client.get(f"/internal/skills/weekly-report?session={sid}", headers=H)
+    assert detail.status_code == 404
+    attachment = client.get(
+        f"/internal/skills/weekly-report/files/x.md?session={sid}", headers=H
+    )
+    assert attachment.status_code == 404
+
+    # 别的会话不受影响
+    other_sid = client.post("/api/sessions").get_json()["id"]
+    visible = client.get(f"/internal/skills/weekly-report?session={other_sid}", headers=H)
+    assert visible.status_code == 200
+    both = client.get(f"/internal/skills?session={other_sid}", headers=H).get_json()["skills"]
+    assert [s["name"] for s in both] == ["other", "weekly-report"]
+
+
+def test_turn_context_hides_the_left_skill_from_the_catalog(client, agent, builtin_root):
+    write_skill(builtin_root, "weekly-report", "name: weekly-report\ndescription: 写周报")
+    write_skill(builtin_root, "other", "name: other\ndescription: 另一个")
+    sid = client.post("/api/sessions").get_json()["id"]
+    client.post(f"/internal/sessions/{sid}/skills", json={"name": "weekly-report"}, headers=H)
+    client.delete(f"/api/sessions/{sid}/skills/weekly-report")
+
+    agent.script = [{"type": "_hold"}, {"type": "turn_end", "status": "done"}]
+    turn_id = _open_turn(client, sid, "继续")
+    ctx = client.get(f"/internal/turns/{turn_id}/context", headers=H).get_json()
+    assert [s["name"] for s in ctx["skills"]] == ["other"]
+    assert ctx["active_skills"] == []
+    # agent 要靠这个在回合提示里说明「这些不再生效」，否则模型会照历史里的旧用法继续调
+    assert ctx["left_skills"] == ["weekly-report"]
+
+    agent.released.set()
+    _finish(client, turn_id)
+
+
+def test_bad_session_argument_is_rejected(client, builtin_root):
+    write_skill(builtin_root, "good", "name: good\ndescription: 正常")
+    assert client.get("/internal/skills?session=abc", headers=H).status_code == 400

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from flask import Blueprint, abort
+from flask import Blueprint, abort, request
 
-from .. import settings, skills
+from .. import settings, skills, store
 from . import cfg, db, json_body
 from .internal import require_token
 
@@ -44,14 +44,19 @@ def set_skill_enabled(name: str):
 
 @internal_bp.get("")
 def internal_list():
-    """给 agent：只返回可用的 skill 摘要，用于系统提示里的清单。"""
+    """给 agent：只返回可用的 skill 摘要，用于系统提示里的清单。
+
+    带上 `session` 时，用户在这个会话里退出过的 skill 不再出现——只挡住系统提示的
+    注入是不够的，模型还可以自己翻清单、读正文，那等于没退出。
+    """
     found = skills.load_skills(skills.skill_roots(cfg()))
     switches = settings.get_skill_switches(db())
+    hidden = set(store.suppressed_skills(db(), _session_arg())) if _session_arg() else set()
     return {
         "skills": [
             skill.summary()
             for skill in skills.sorted_skills(found)
-            if skills.usable(skill, switches)
+            if skills.usable(skill, switches) and skill.name not in hidden
         ]
     }
 
@@ -78,6 +83,17 @@ def internal_file(name: str, rel_path: str):
         abort(400, str(exc))
 
 
+def _session_arg() -> int | None:
+    """`?session=<id>`，agent 调内部接口时带上当前会话。"""
+    raw = request.args.get("session")
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        abort(400, "session 必须是整数")
+
+
 def _usable_or_404(name: str) -> skills.Skill:
     if not skills.NAME_RE.match(name):
         abort(404, "skill 不存在")
@@ -86,4 +102,7 @@ def _usable_or_404(name: str) -> skills.Skill:
     # 有问题的、被用户停用的 skill 都不交给模型，避免它照着半截说明做事
     if skill is None or not skills.usable(skill, settings.get_skill_switches(db())):
         abort(404, "skill 不存在、有问题或已停用")
+    session_id = _session_arg()
+    if session_id is not None and name in store.suppressed_skills(db(), session_id):
+        abort(404, "用户在这个会话里已经退出这个 skill")
     return skill

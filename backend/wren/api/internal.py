@@ -36,6 +36,9 @@ def turn_context(turn_id: int):
     user_message = next(m for m in current["messages"] if m["role"] == "user")
     available = skills.load_skills(skills.skill_roots(cfg()))
     switches = settings.get_skill_switches(conn)
+    # 用户在这个会话里退出过的 skill：清单里也不出现，否则模型翻到它、读一遍正文，
+    # 这个回合又照着做了，退出等于没退。
+    hidden = set(store.suppressed_skills(conn, turn["session_id"]))
     return {
         "session_id": turn["session_id"],
         "turn_id": turn_id,
@@ -46,8 +49,11 @@ def turn_context(turn_id: int):
         "skills": [
             skill.summary()
             for skill in skills.sorted_skills(available)
-            if skills.usable(skill, switches)
+            if skills.usable(skill, switches) and skill.name not in hidden
         ],
+        # agent 要在回合提示里明说这些已经不生效：历史里还有它们成功调用过的记录，
+        # 不说就会照着旧用法继续调它们带的工具。
+        "left_skills": sorted(hidden),
         # 用户 `/skill-name` 点名的、以及本会话里已经用上的 skill，正文直接带上。
         "active_skills": _active_skills(
             user_message["content"],
