@@ -11,5 +11,6 @@ export const sidebarLinks = [notesLink, { to: '/settings', label: '设置' }];
 export const settingsSections = [
   { to: '/settings/model', label: '模型' },
   { to: '/settings/tools', label: '工具' },
+  { to: '/settings/skills', label: 'Skills' },
   { to: '/settings/prompt', label: '系统提示' },
 ];

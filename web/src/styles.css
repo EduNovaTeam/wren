@@ -98,3 +98,19 @@ textarea { resize: vertical; width: 100%; }
 .note header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; }
 .note header strong { flex: 1; }
 .note-card { display: inline-block; border: 1px solid var(--border); background: #fff; border-radius: 8px; padding: 4px 10px; margin: 6px 0; text-decoration: none; font-size: 14px; }
+
+.skill-list { list-style: none; padding: 0; }
+.skill-list li { padding: 10px 0; border-bottom: 1px solid var(--border); }
+.skill-list li.off strong { color: var(--muted); }
+.skill-list li.bad { opacity: 0.9; }
+.skill-list p { margin: 2px 0 0 26px; }
+.badge { display: inline-block; font-size: 12px; line-height: 1.4; padding: 0 6px; border-radius: 999px; background: var(--panel); color: var(--muted); border: 1px solid var(--border); }
+.badge.danger { color: var(--danger); border-color: #e6b8b3; background: #fdf1ef; }
+.tool-tag { margin-right: 4px; }
+.skill-event { display: flex; align-items: center; gap: 6px; font-size: 14px; border: 1px solid var(--border); background: #fff; border-radius: 8px; padding: 4px 10px; margin: 6px 0; }
+.skill-event.warn { border-color: #e6b8b3; background: #fdf7f6; }
+.active-skills { max-width: 820px; margin: 0 auto 6px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.skill-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; background: var(--panel); border: 1px solid var(--border); border-radius: 999px; padding: 1px 4px 1px 10px; }
+.skill-chip.bad { border-color: #e6b8b3; color: var(--danger); }
+.skill-chip-note { font-size: 12px; }
+.skill-chip button { padding: 0 4px; }

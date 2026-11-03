@@ -17,6 +17,8 @@ const error = ref('');
 const loading = ref(false);
 const sending = ref(false);
 const scroller = ref(null);
+/** @type {import('vue').Ref<any[]>} */
+const sessionSkills = ref([]);
 /** @type {{ close: () => void } | null} */
 let subscription = null;
 
@@ -36,8 +38,32 @@ onMounted(async () => {
   } finally {
     loading.value = false;
     scrollToBottom();
+    await loadSessionSkills();
   }
 });
+
+async function loadSessionSkills() {
+  if (!props.sessionId) {
+    sessionSkills.value = [];
+    return;
+  }
+  try {
+    sessionSkills.value = (await api.listSessionSkills(props.sessionId)).skills;
+  } catch {
+    // 会话还没有激活项或 agent 暂时不可用时，不打断对话。
+  }
+}
+
+/** @param {{ name: string }} skill */
+async function removeSkill(skill) {
+  if (!props.sessionId) return;
+  try {
+    await api.removeSessionSkill(props.sessionId, skill.name);
+    await loadSessionSkills();
+  } catch (err) {
+    error.value = err.message;
+  }
+}
 
 onBeforeUnmount(() => subscription?.close());
 
@@ -54,7 +80,13 @@ function follow(turnId, userText, replace = false) {
   subscription = subscribeTurn(turnId, (event) => {
     applyEvent(view, event);
     scrollToBottom();
-    if (event.type === 'turn_end') refreshSessions();
+    if (event.type === 'skill_activated' || event.type === 'skill_unavailable') {
+      loadSessionSkills();
+    }
+    if (event.type === 'turn_end') {
+      loadSessionSkills();
+      refreshSessions();
+    }
   });
   subscription.done.catch((err) => {
     view.status = 'failed';
@@ -126,6 +158,22 @@ function scrollToBottom() {
     </div>
     <div class="composer">
       <p v-if="error" class="error small">{{ error }}</p>
+      <div v-if="sessionSkills.length" class="active-skills">
+        <span class="muted small">已启用 Skill：</span>
+        <span
+          v-for="skill in sessionSkills"
+          :key="skill.name"
+          class="skill-chip"
+          :class="{ bad: skill.status !== 'ok' }"
+          :title="skill.error || skill.description"
+        >
+          {{ skill.name }}
+          <span v-if="skill.status !== 'ok'" class="skill-chip-note">
+            {{ skill.status === 'disabled' ? '已停用' : skill.status === 'unknown' ? '未校验' : '不可用' }}
+          </span>
+          <button type="button" class="link" title="从本会话移除" @click="removeSkill(skill)">✕</button>
+        </span>
+      </div>
       <div class="composer-box">
         <textarea
           v-model="input"

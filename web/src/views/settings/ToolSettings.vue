@@ -34,8 +34,12 @@ async function toggle(tool) {
       <label class="switch">
         <input type="checkbox" :checked="t.enabled" @change="toggle(t)" />
         <code>{{ t.name }}</code>
+        <span v-if="t.exposure === 'on-demand'" class="badge">按需</span>
       </label>
       <p class="muted small">{{ t.description }}</p>
+      <p v-if="t.exposure === 'on-demand' && !t.enabled" class="muted small">
+        已明确禁用：即使 Skill 声明需要，也不会开放。
+      </p>
     </li>
   </ul>
 </template>
