@@ -53,6 +53,10 @@ export const api = {
   getSystemPrompt: () => request('GET', '/api/settings/system-prompt'),
   putSystemPrompt: (text) => request('PUT', '/api/settings/system-prompt', { system_prompt: text }),
 
+  listSkills: () => request('GET', '/api/skills'),
+  setSkillEnabled: (name, enabled) =>
+    request('PUT', `/api/skills/${encodeURIComponent(name)}`, { enabled }),
+
   listNotes: () => request('GET', '/api/notes'),
   deleteNote: (id) => request('DELETE', `/api/notes/${id}`),
 };
