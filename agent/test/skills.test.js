@@ -193,7 +193,9 @@ test('a skill kept from earlier turns is labelled as session-scoped', () => {
   assert.match(prompt, /本会话已启用 skill「weekly-report」/);
   // 必须说清之后每条消息都算数，否则模型会按 skill 正文里的适用条件把它当成「只在命令后生效」
   assert.match(prompt, /它对之后每条消息都生效/);
-  assert.match(prompt, /不必再写 \/weekly-report/);
+  assert.match(prompt, /即使消息里没有 \/weekly-report 命令也照样按它处理/);
+  // 描述是「什么时候该挑这个 skill」的触发条件，出现在生效段里会被模型拿来论证不适用
+  assert.doesNotMatch(prompt, /按团队模板撰写个人周报。/);
   assert.doesNotMatch(prompt, /用户指定本回合使用/);
   assert.match(prompt, /先读模板/);
 });
