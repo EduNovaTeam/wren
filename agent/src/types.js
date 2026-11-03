@@ -46,6 +46,7 @@
  * @property {Record<string, boolean>} tool_switches
  * @property {SkillSummary[]} skills  可用的 skill 清单（只有名字和描述，正文按需读取）
  * @property {ActiveSkill[]} active_skills  本回合点名的、以及本会话已启用的 skill
+ * @property {string[]} [left_skills]  用户在本会话里退出过的 skill 名（不再生效）
  * @property {string[]} [visible_tools]  本回合可调用的工具，由 turn.js 填，供系统提示使用
  * @property {HistoryTurn[]} history  按时间顺序，已结束的回合
  * @property {ChatMessage} user_message

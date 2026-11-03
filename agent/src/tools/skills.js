@@ -29,14 +29,14 @@ export const useSkill = {
 
     if (!skillName) {
       if (relative) throw new Error('读取附带文件需要同时提供 name');
-      return renderList(await backend.listSkills(signal));
+      return renderList(await backend.listSkills(sessionId, signal));
     }
     if (relative) {
-      const found = await backend.getSkillFile(skillName, relative, signal);
+      const found = await backend.getSkillFile(sessionId, skillName, relative, signal);
       return found.content;
     }
 
-    const skill = await backend.getSkill(skillName, signal);
+    const skill = await backend.getSkill(sessionId, skillName, signal);
     // 读过正文就算用上了：记进会话，后续回合继续带上。失败不影响本回合的结果。
     await backend.activateSkill(sessionId, skill.name, signal).catch(() => {});
     const lines = [`# ${skill.name}`, '', skill.description, '', skill.body];

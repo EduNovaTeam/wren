@@ -119,6 +119,20 @@ test('tool list is fixed per turn and honors switches', async () => {
   assert.deepEqual(llm.requests.at(-1).tools.map((t) => t.function.name), ['add']);
 });
 
+test('a skill the user left is announced as no longer in effect', async () => {
+  llm.push({ text: 'ok' });
+  const events = await runTurn(newTurn({ left_skills: ['research'] }));
+  // 它的工具不能被带进来
+  assert.deepEqual(events.find((e) => e.type === 'turn_info').tools, ['add', 'wait']);
+  // 历史里还有它成功调用过的记录，不说就会被照着做
+  const messages = llm.requests.at(-1).messages;
+  const reminder = messages.at(-2);
+  assert.equal(messages.at(-1).role, 'user');
+  assert.equal(reminder.role, 'system');
+  assert.match(reminder.content, /退出了 skill：research/);
+  assert.match(reminder.content, /调用会失败/);
+});
+
 test('a skill brings its allowed tools into the turn', async () => {
   llm.push({ text: 'ok' });
   const events = await runTurn(newTurn({

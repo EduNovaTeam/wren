@@ -75,12 +75,24 @@ export async function runTurn(ctx, deps, emit, signal) {
   // 模型会拿自己更早那句「我没有这个工具」当事实，连工具清单和系统提示都推翻
   // （实测：把它自己那两句否认从历史里删掉就能正常调用）。所以这里在用户消息前
   // 补一条只对本回合生效的提醒：位置在历史之后才管用，写进系统提示的第一段没用。
+  const reminders = [];
   if (granted.size) {
-    messages.splice(messages.length - 1, 0, {
-      role: 'system',
-      content: `工具提醒：本回合可以直接调用 ${visibleNames.join('、')}（含 skill 带来的工具）。`
+    reminders.push(
+      `工具提醒：本回合可以直接调用 ${visibleNames.join('、')}（含 skill 带来的工具）。`
         + '如果你印象里其中某个不可用，那是更早回合的情况，现在不成立了。',
-    });
+    );
+  }
+  // 反过来的情况：用户退出了 skill。历史里还有它被调用成功的记录，模型会照着自己
+  // 之前的用法继续调它带来的工具，所以必须明说这些已经不可用。
+  const left = ctx.left_skills ?? [];
+  if (left.length) {
+    reminders.push(
+      `用户在这段对话里退出了 skill：${left.join('、')}。它们不再生效，做法不用再照做，`
+        + '它们带来的工具本回合也不可用（调用会失败）。要重新启用得由用户自己发 /skill 名。',
+    );
+  }
+  if (reminders.length) {
+    messages.splice(messages.length - 1, 0, { role: 'system', content: reminders.join('\n') });
   }
   emit({
     type: 'turn_info',

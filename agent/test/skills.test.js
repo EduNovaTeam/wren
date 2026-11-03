@@ -19,20 +19,21 @@ const LIST = [{ name: 'weekly-report', description: '按团队模板撰写个人
 function fakeBackend(options = {}) {
   return {
     calls: /** @type {any[]} */ ([]),
-    async listSkills() {
-      this.calls.push(['list']);
+    /** @param {number} sessionId */
+    async listSkills(sessionId) {
+      this.calls.push(['list', sessionId]);
       if (options.failure) throw options.failure;
       return { skills: options.skills ?? LIST };
     },
-    /** @param {string} name */
-    async getSkill(name) {
-      this.calls.push(['skill', name]);
+    /** @param {number} sessionId @param {string} name */
+    async getSkill(sessionId, name) {
+      this.calls.push(['skill', sessionId, name]);
       if (options.failure) throw options.failure;
       return options.skill ?? SKILL;
     },
-    /** @param {string} name @param {string} file */
-    async getSkillFile(name, file) {
-      this.calls.push(['file', name, file]);
+    /** @param {number} sessionId @param {string} name @param {string} file */
+    async getSkillFile(sessionId, name, file) {
+      this.calls.push(['file', sessionId, name, file]);
       if (options.failure) throw options.failure;
       return options.file ?? { path: file, content: '【周报】模板正文' };
     },
@@ -60,9 +61,10 @@ test('use_skill returns the body and marks the skill active for the session', as
   assert.match(text, /# 写周报/);
   assert.match(text, /按团队模板撰写个人周报/);
   assert.match(text, /references\/template\.md/);
-  // name 两端空白要清掉，否则后端按名字查不到；读完正文要记进会话
+  // name 两端空白要清掉，否则后端按名字查不到；读完正文要记进会话。
+  // 读写都要带上会话号：用户退出过的 skill 由后端按会话挡住。
   assert.deepEqual(backend.calls, [
-    ['skill', 'weekly-report'],
+    ['skill', 1, 'weekly-report'],
     ['activate', 1, 'weekly-report'],
   ]);
 });
@@ -80,7 +82,7 @@ test('reading a skill does not promise tools for a later turn', async () => {
 test('reading an attached file does not re-activate the skill', async () => {
   const backend = fakeBackend();
   await useSkill.execute({ name: 'weekly-report', file: 'references/template.md' }, ctx(backend));
-  assert.deepEqual(backend.calls, [['file', 'weekly-report', 'references/template.md']]);
+  assert.deepEqual(backend.calls, [['file', 1, 'weekly-report', 'references/template.md']]);
 });
 
 test('a failed activation still returns the body', async () => {
@@ -95,7 +97,7 @@ test('use_skill without a name returns the catalog instead of a body', async () 
   assert.match(text, /可用的 skill（1 个）/);
   assert.match(text, /weekly-report：按团队模板撰写个人周报。/);
   assert.match(text, /use_skill\(name\)/);
-  assert.deepEqual(backend.calls, [['list']]);
+  assert.deepEqual(backend.calls, [['list', 1]]);
 });
 
 test('use_skill renders an empty catalog without inventing entries', async () => {
@@ -110,7 +112,7 @@ test('use_skill reads an attached file when file is given', async () => {
     ctx(backend),
   );
   assert.equal(text, '【周报】模板正文');
-  assert.deepEqual(backend.calls, [['file', 'weekly-report', 'references/template.md']]);
+  assert.deepEqual(backend.calls, [['file', 1, 'weekly-report', 'references/template.md']]);
 });
 
 test('use_skill refuses a file without a skill name', async () => {
