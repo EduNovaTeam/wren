@@ -133,6 +133,25 @@ test('a skill the user left is announced as no longer in effect', async () => {
   assert.match(reminder.content, /调用会失败/);
 });
 
+test('a waiting skill still hands over its tools', async () => {
+  llm.push({ text: 'ok' });
+  const events = await runTurn(newTurn({
+    active_skills: [
+      {
+        name: 'lead', description: '', body: '# 主导', files: [], reason: 'session',
+        role: 'primary', allowed_tools: [],
+      },
+      {
+        name: 'waiting', description: '待命', body: '', files: [], reason: 'session',
+        role: 'secondary', allowed_tools: ['secret'],
+      },
+    ],
+  }));
+  // 待命的只是不给正文；工具还得开放，否则读了正文要等下一回合才有工具
+  assert.deepEqual(events.find((e) => e.type === 'turn_info').tools,
+    ['add', 'wait', 'secret']);
+});
+
 test('a skill brings its allowed tools into the turn', async () => {
   llm.push({ text: 'ok' });
   const events = await runTurn(newTurn({

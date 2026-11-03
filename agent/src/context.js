@@ -86,40 +86,82 @@ export const activeSkillsSection = {
   render: (ctx) => {
     const active = ctx.active_skills ?? [];
     if (!active.length) return null;
-    return active
-      .map((skill) => {
-        const parts =
-          skill.reason === 'session'
-            ? [
-                `本会话已启用 skill「${skill.name}」，它对之后每条消息都生效，即使消息里没有 /${skill.name}`
-                  + ' 命令也照样按它处理。下面是当前生效的做法：',
-                skill.body,
-              ]
-            : [
-                `用户指定本回合使用 skill「${skill.name}」（${skill.description}），照它说的做：`,
-                skill.body,
-              ];
-        // 工具清单是接口参数，模型未必会去翻；实测它会顺着上一句「下一回合才能用」继续说没有。
-        // 所以这里把已开放的工具写成文字，明确到「现在就能调」。
-        if (skill.allowed_tools?.length) {
-          parts.push(
-            `这个 skill 需要的工具本回合已经开放：${skill.allowed_tools.join('、')}。`
-              + '需要时直接调用，不要说它不存在或再等一个回合。',
-          );
-        }
-        if (skill.reason === 'session') {
-          parts.push('用户明确说停用、或明确要你去做别的事时才不套用它。');
-        }
-        if (skill.files?.length) {
-          parts.push(
-            `附带文件：${skill.files.join('、')}。需要时用 use_skill({ name: '${skill.name}', file }) 读取。`,
-          );
-        }
-        return parts.join('\n\n');
-      })
-      .join('\n\n');
+    // role 缺省当主导：老路径（单 skill）不传这个字段，行为保持不变
+    const primary = active.filter((skill) => (skill.role ?? 'primary') === 'primary');
+    const waiting = active.filter((skill) => skill.role === 'secondary');
+    const blocks = [];
+    if (primary.length + waiting.length > 1) blocks.push(choiceRules(primary, waiting));
+    for (const skill of primary) blocks.push(renderActive(skill, active.length > 1));
+    for (const skill of waiting) blocks.push(renderWaiting(skill));
+    return blocks.join('\n\n');
   },
 };
+
+/**
+ * 多个 skill 同时生效时的判断规则。不给规则时，每个 skill 的段落都在说「对之后每条
+ * 消息都生效」，模型会把几套做法混在一起用。
+ * @param {any[]} primary
+ * @param {any[]} waiting
+ */
+function choiceRules(primary, waiting) {
+  const lead = primary.map((s) => `「${s.name}」`).join('、');
+  const rest = waiting.map((s) => `「${s.name}」`).join('、');
+  return [
+    `本会话有 ${primary.length + waiting.length} 个 skill 生效：${lead}${rest ? `、${rest}` : ''}。`
+      + '用哪个按这个顺序判断：',
+    '1. 只有一个和这条消息直接相关时，就用它，不用管其它几个；',
+    `2. 多个都相关时，用主导的${lead}，其它只在它没覆盖的地方补充，别把两套做法或两种格式混在一起；`,
+    '3. 实在分不清用户要按哪个，先问一句，别猜；',
+    '4. 都不相关就都不套用，正常回答。',
+  ].join('\n');
+}
+
+/**
+ * 主导的那个：连同正文一起给。
+ * @param {any} skill
+ * @param {boolean} contested 是否还有别的 skill 在场
+ */
+function renderActive(skill, contested) {
+  const parts = [];
+  if (skill.reason === 'session') {
+    parts.push(
+      `${contested ? '主导的 skill' : '本会话已启用 skill'}「${skill.name}」`
+        + `，它对之后每条消息都生效，即使消息里没有 /${skill.name}`
+        + ' 命令也照样按它处理。下面是当前生效的做法：',
+      skill.body,
+    );
+  } else {
+    parts.push(`用户指定本回合使用 skill「${skill.name}」（${skill.description}），照它说的做：`, skill.body);
+  }
+  // 工具清单是接口参数，模型未必会去翻；实测它会顺着上一句「下一回合才能用」继续说没有。
+  // 所以这里把已开放的工具写成文字，明确到「现在就能调」。
+  if (skill.allowed_tools?.length) {
+    parts.push(
+      `这个 skill 需要的工具本回合已经开放：${skill.allowed_tools.join('、')}。`
+        + '需要时直接调用，不要说它不存在或再等一个回合。',
+    );
+  }
+  if (skill.reason === 'session') {
+    parts.push('用户明确说停用、或明确要你去做别的事时才不套用它。');
+  }
+  if (skill.files?.length) {
+    parts.push(
+      `附带文件：${skill.files.join('、')}。需要时用 use_skill({ name: '${skill.name}', file }) 读取。`,
+    );
+  }
+  return parts.join('\n\n');
+}
+
+/**
+ * 待命的：只给名字和一句话描述，不给正文。正文一进来，几套规范就会混着用；
+ * 不给正文，模型要真需要就会自己去读，这也是整个 skill 系统的按需加载原则。
+ * @param {any} skill
+ */
+function renderWaiting(skill) {
+  return `待命的 skill「${skill.name}」：${skill.description}\n`
+    + `这条消息用不到它就别管它。真需要时先调用 use_skill({ name: '${skill.name}' })`
+    + ' 读完整做法，再照着做。';
+}
 
 export const DEFAULT_SECTIONS = [
   identitySection,

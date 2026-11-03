@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+import time
 from pathlib import Path
 
 import pytest
@@ -293,6 +294,12 @@ def _open_turn(client, sid: int, content: str) -> int:
     return created.get_json()["turn_id"]
 
 
+def _turn_skills(client, turn_id: int) -> list[dict]:
+    """回合上下文里要注入的 skill（主导在前）。"""
+    context = client.get(f"/internal/turns/{turn_id}/context", headers=H).get_json()
+    return context["active_skills"]
+
+
 def test_invoked_skill_stays_active_in_later_turns(client, agent, builtin_root):
     write_skill(
         builtin_root, "weekly-report", "name: weekly-report\ndescription: 写周报", body="# 写周报"
@@ -480,7 +487,7 @@ def test_session_skill_list_shows_what_is_in_effect(client, builtin_root):
 
     client.post(f"/internal/sessions/{sid}/skills", json={"name": "weekly-report"}, headers=H)
     assert client.get(f"/api/sessions/{sid}/skills").get_json()["skills"] == [
-        {"name": "weekly-report", "description": "写周报"}
+        {"name": "weekly-report", "description": "写周报", "primary": True}
     ]
 
 
@@ -557,7 +564,7 @@ def test_session_skill_list_hides_deleted_and_globally_disabled(client, builtin_
     for name in ("gone", "off"):
         client.post(f"/internal/sessions/{sid}/skills", json={"name": name}, headers=H)
     listed = client.get(f"/api/sessions/{sid}/skills").get_json()["skills"]
-    assert [s["name"] for s in listed] == ["gone", "off"]
+    assert {s["name"] for s in listed} == {"gone", "off"}
 
     shutil.rmtree(directory)
     client.put("/api/skills/off", json={"enabled": False})
@@ -627,3 +634,91 @@ def test_turn_context_hides_the_left_skill_from_the_catalog(client, agent, built
 def test_bad_session_argument_is_rejected(client, builtin_root):
     write_skill(builtin_root, "good", "name: good\ndescription: 正常")
     assert client.get("/internal/skills?session=abc", headers=H).status_code == 400
+
+
+# ---- 多个 skill 同时生效：一个主导，其余待命 ----------------------------------
+
+
+def test_the_most_recently_used_skill_is_the_primary_one(client, agent, builtin_root):
+    write_skill(builtin_root, "older", "name: older\ndescription: 先用的", body="# 先用的正文")
+    write_skill(builtin_root, "newer", "name: newer\ndescription: 后用的", body="# 后用的正文")
+    sid = client.post("/api/sessions").get_json()["id"]
+    client.post(f"/internal/sessions/{sid}/skills", json={"name": "older"}, headers=H)
+    time.sleep(0.02)  # last_used_at 是毫秒精度，隔开一点才排得出先后
+    client.post(f"/internal/sessions/{sid}/skills", json={"name": "newer"}, headers=H)
+
+    agent.script = [{"type": "_hold"}, {"type": "turn_end", "status": "done"}]
+    turn_id = _open_turn(client, sid, "随便问点什么")
+    skills_ctx = _turn_skills(client, turn_id)
+
+    # 最近用过的排最前，且是唯一带正文的那个
+    assert [s["name"] for s in skills_ctx] == ["newer", "older"]
+    assert [s["role"] for s in skills_ctx] == ["primary", "secondary"]
+    assert skills_ctx[0]["body"] == "# 后用的正文"
+    assert skills_ctx[1]["body"] == ""
+
+    agent.released.set()
+    _finish(client, turn_id)
+
+
+def test_a_named_skill_leads_no_matter_what_was_used_before(client, agent, builtin_root):
+    write_skill(builtin_root, "older", "name: older\ndescription: 先用的", body="# 先用的正文")
+    write_skill(builtin_root, "newer", "name: newer\ndescription: 后用的", body="# 后用的正文")
+    sid = client.post("/api/sessions").get_json()["id"]
+    for name in ("older", "newer"):
+        client.post(f"/internal/sessions/{sid}/skills", json={"name": name}, headers=H)
+
+    agent.script = [{"type": "_hold"}, {"type": "turn_end", "status": "done"}]
+    turn_id = _open_turn(client, sid, "/older 按这个来")
+    skills_ctx = _turn_skills(client, turn_id)
+
+    assert [s["name"] for s in skills_ctx] == ["older", "newer"]
+    assert [s["role"] for s in skills_ctx] == ["primary", "secondary"]
+    assert skills_ctx[0]["reason"] == "invoked"
+
+    agent.released.set()
+    _finish(client, turn_id)
+
+
+def test_secondary_skills_still_hand_over_their_tools(client, agent, builtin_root):
+    """待命的只是不给正文，工具还是要开放，否则读正文就得等下一回合。"""
+    write_skill(
+        builtin_root,
+        "with-tools",
+        "name: with-tools\ndescription: 带工具\nallowed-tools: fetch_url",
+        body="# 正文",
+    )
+    write_skill(builtin_root, "lead", "name: lead\ndescription: 主导", body="# 主导正文")
+    sid = client.post("/api/sessions").get_json()["id"]
+    client.post(f"/internal/sessions/{sid}/skills", json={"name": "with-tools"}, headers=H)
+    time.sleep(0.02)
+    client.post(f"/internal/sessions/{sid}/skills", json={"name": "lead"}, headers=H)
+
+    agent.script = [{"type": "_hold"}, {"type": "turn_end", "status": "done"}]
+    turn_id = _open_turn(client, sid, "开始")
+    skills_ctx = _turn_skills(client, turn_id)
+    assert [s["role"] for s in skills_ctx] == ["primary", "secondary"]
+    assert skills_ctx[1]["allowed_tools"] == ["fetch_url"]
+
+    agent.released.set()
+    _finish(client, turn_id)
+
+
+def test_user_can_pick_the_primary_skill(client, builtin_root):
+    write_skill(builtin_root, "first", "name: first\ndescription: 第一个")
+    write_skill(builtin_root, "second", "name: second\ndescription: 第二个")
+    sid = client.post("/api/sessions").get_json()["id"]
+    client.post(f"/internal/sessions/{sid}/skills", json={"name": "first"}, headers=H)
+    time.sleep(0.02)
+    client.post(f"/internal/sessions/{sid}/skills", json={"name": "second"}, headers=H)
+
+    listed = client.get(f"/api/sessions/{sid}/skills").get_json()["skills"]
+    assert [(s["name"], s["primary"]) for s in listed] == [("second", True), ("first", False)]
+
+    response = client.post(f"/api/sessions/{sid}/skills/first/primary")
+    assert response.status_code == 200
+    after = response.get_json()["skills"]
+    assert [(s["name"], s["primary"]) for s in after] == [("first", True), ("second", False)]
+
+    # 点名一个不认识或已经坏掉的，照旧 404
+    assert client.post(f"/api/sessions/{sid}/skills/nope/primary").status_code == 404

@@ -34,6 +34,7 @@
  * @property {string[]} files
  * @property {string[]} allowed_tools
  * @property {'invoked'|'session'} reason  invoked=用户这条消息点名的，session=本会话此前用上的
+ * @property {'primary'|'secondary'} [role]  primary=主导（带正文），secondary=待命（只有描述）
  */
 
 /**

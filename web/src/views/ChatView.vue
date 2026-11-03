@@ -64,6 +64,17 @@ async function leaveSkill(name) {
   }
 }
 
+/** 指定主导：多个 skill 都相关时按它走，其余只在它没覆盖的地方补充。 */
+/** @param {string} name */
+async function makePrimary(name) {
+  try {
+    const data = await api.setPrimarySkill(props.sessionId, name);
+    activeSkills.value = data.skills;
+  } catch (err) {
+    error.value = err.message;
+  }
+}
+
 /**
  * @param {number} turnId
  * @param {string} userText
@@ -154,8 +165,22 @@ function scrollToBottom() {
     <div class="composer">
       <div v-if="activeSkills.length" class="skill-chips">
         <span class="muted small">生效中</span>
-        <span v-for="s in activeSkills" :key="s.name" class="skill-chip" :title="s.description">
-          <code>{{ s.name }}</code>
+        <span
+          v-for="s in activeSkills"
+          :key="s.name"
+          class="skill-chip"
+          :class="{ primary: s.primary }"
+          :title="s.primary ? `${s.description}（主导）` : `点击设为主导 · ${s.description}`"
+        >
+          <button
+            class="chip-name"
+            :disabled="s.primary"
+            :aria-label="`把 ${s.name} 设为主导`"
+            @click="makePrimary(s.name)"
+          >
+            <code>{{ s.name }}</code>
+            <span v-if="s.primary" class="chip-tag">主导</span>
+          </button>
           <button class="chip-close" :aria-label="`退出 ${s.name}`" @click="leaveSkill(s.name)">×</button>
         </span>
       </div>

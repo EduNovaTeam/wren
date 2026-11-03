@@ -222,3 +222,64 @@ test('a skill kept from earlier turns is labelled as session-scoped', () => {
   assert.doesNotMatch(prompt, /用户指定本回合使用/);
   assert.match(prompt, /先读模板/);
 });
+
+test('several active skills get a rule for picking one, and only the lead brings its body', () => {
+  const prompt = buildSystemPrompt(DEFAULT_SECTIONS, {
+    system_prompt: '',
+    skills: LIST,
+    active_skills: [
+      {
+        name: 'web-research',
+        description: '查公开网页资料。',
+        body: '# 调研\n\n先抓页面再总结',
+        files: [],
+        allowed_tools: ['fetch_url'],
+        reason: 'session',
+        role: 'primary',
+      },
+      {
+        name: 'tech-doc-writing',
+        description: '按团队规范写技术文档。',
+        body: '# 文档规范\n\n标题用动宾短语',
+        files: [],
+        allowed_tools: [],
+        reason: 'session',
+        role: 'secondary',
+      },
+    ],
+  });
+
+  // 光有「每个都对每条消息生效」时，模型会把两套做法混在一起，所以要给判断顺序
+  assert.match(prompt, /本会话有 2 个 skill 生效/);
+  assert.match(prompt, /只有一个和这条消息直接相关时，就用它/);
+  assert.match(prompt, /多个都相关时，用主导的「web-research」/);
+  assert.match(prompt, /别把两套做法或两种格式混在一起/);
+  assert.match(prompt, /实在分不清用户要按哪个，先问一句/);
+
+  // 主导带正文，待命的只有一句话：正文在场就会混着用
+  assert.match(prompt, /主导的 skill「web-research」/);
+  assert.match(prompt, /先抓页面再总结/);
+  assert.doesNotMatch(prompt, /标题用动宾短语/);
+  assert.match(prompt, /待命的 skill「tech-doc-writing」：按团队规范写技术文档。/);
+  assert.match(prompt, /use_skill\(\{ name: 'tech-doc-writing' \}\)/);
+});
+
+test('a single active skill keeps the plain wording without the rule block', () => {
+  const prompt = buildSystemPrompt(DEFAULT_SECTIONS, {
+    system_prompt: '',
+    skills: LIST,
+    active_skills: [
+      {
+        name: 'weekly-report',
+        description: '写周报。',
+        body: '# 写周报',
+        files: [],
+        allowed_tools: [],
+        reason: 'session',
+        role: 'primary',
+      },
+    ],
+  });
+  assert.doesNotMatch(prompt, /本会话有 1 个 skill 生效/);
+  assert.match(prompt, /本会话已启用 skill「weekly-report」/);
+});

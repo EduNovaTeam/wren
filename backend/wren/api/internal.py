@@ -88,7 +88,12 @@ def _active_skills(
     session_names: list[str],
     switches: dict[str, bool],
 ) -> list[dict]:
-    """本回合要注入哪些 skill：用户点名的排在前面，其余是会话里生效中的。"""
+    """本回合要注入哪些 skill：一个「主导」带正文，其余「待命」只给一句话。
+
+    多个 skill 同时生效时，全量注入正文会让模型把几套做法混着用。所以只给主导的正文；
+    待命的保留名字和描述，需要时模型自己 use_skill 去读。它们的 allowed-tools 仍然
+    全部开放，不会出现「读了正文还要等下一回合」。
+    """
     out: list[dict] = []
     seen: set[str] = set()
 
@@ -96,7 +101,7 @@ def _active_skills(
     if invocation:
         skill = available.get(invocation[0])
         if skill is not None and skills.usable(skill, switches):
-            out.append(_payload(skill, "invoked"))
+            out.append(_payload(skill, "invoked", "primary"))
             seen.add(skill.name)
 
     for name in session_names:
@@ -106,17 +111,20 @@ def _active_skills(
         # skill 可能已经被删掉、改坏或被用户停用，跳过即可，不要让整个回合失败
         if skill is None or not skills.usable(skill, switches):
             continue
-        out.append(_payload(skill, "session"))
+        # 没有点名时，最近用过的那个（排在最前）是主导
+        out.append(_payload(skill, "session", "secondary" if out else "primary"))
         seen.add(name)
     return out
 
 
-def _payload(skill: skills.Skill, reason: str) -> dict:
+def _payload(skill: skills.Skill, reason: str, role: str) -> dict:
     return {
         "name": skill.name,
         "description": skill.description,
-        "body": skill.body,
+        # 待命的不注入正文：模型看不到它的完整规范，就不会把它和主导的那套混在一起
+        "body": skill.body if role == "primary" else "",
         "files": skills.list_files(skill),
         "allowed_tools": list(skill.allowed_tools),
         "reason": reason,
+        "role": role,
     }

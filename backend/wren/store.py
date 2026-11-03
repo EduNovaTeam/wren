@@ -70,7 +70,7 @@ def delete_session(conn: sqlite3.Connection, session_id: int) -> bool:
 def activate_skill(
     conn: sqlite3.Connection, session_id: int, name: str, *, explicit: bool = True
 ) -> None:
-    """把 skill 记为会话级生效。
+    """把 skill 记为会话级生效，并刷新它的「最近使用」时间。
 
     `explicit` 区分来源：用户 `/名字` 点名（True）会清掉「已退出」的标记；模型自己
     读到正文（False）只在该 skill 没被退出过时才生效——否则用户刚点的退出，下一句
@@ -79,16 +79,41 @@ def activate_skill(
     now = utcnow()
     if explicit:
         conn.execute(
-            "INSERT INTO session_skills (session_id, skill_name, activated_at, suppressed_at)"
-            " VALUES (?, ?, ?, NULL)"
-            " ON CONFLICT(session_id, skill_name) DO UPDATE SET suppressed_at = NULL",
-            (session_id, name, now),
+            "INSERT INTO session_skills"
+            " (session_id, skill_name, activated_at, last_used_at, suppressed_at)"
+            " VALUES (?, ?, ?, ?, NULL)"
+            " ON CONFLICT(session_id, skill_name)"
+            " DO UPDATE SET suppressed_at = NULL, last_used_at = excluded.last_used_at",
+            (session_id, name, now, now),
         )
         return
+    # 模型读了一遍＝正在用这个 skill：刷新时间，排序时它会浮到最前（也就是成为主导）。
+    # 但被用户退出过的行不动，否则读一次就复活了。
+    refreshed = conn.execute(
+        "UPDATE session_skills SET last_used_at = ?"
+        " WHERE session_id = ? AND skill_name = ? AND suppressed_at IS NULL",
+        (now, session_id, name),
+    )
+    if refreshed.rowcount:
+        return
     conn.execute(
-        "INSERT OR IGNORE INTO session_skills (session_id, skill_name, activated_at)"
-        " VALUES (?, ?, ?)",
-        (session_id, name, now),
+        "INSERT OR IGNORE INTO session_skills"
+        " (session_id, skill_name, activated_at, last_used_at)"
+        " VALUES (?, ?, ?, ?)",
+        (session_id, name, now, now),
+    )
+
+
+def mark_primary(conn: sqlite3.Connection, session_id: int, name: str) -> None:
+    """用户在界面上指定「主导」：刷新最近使用时间，排序时排到最前。"""
+    now = utcnow()
+    conn.execute(
+        "INSERT INTO session_skills"
+        " (session_id, skill_name, activated_at, last_used_at, suppressed_at)"
+        " VALUES (?, ?, ?, ?, NULL)"
+        " ON CONFLICT(session_id, skill_name)"
+        " DO UPDATE SET last_used_at = excluded.last_used_at, suppressed_at = NULL",
+        (session_id, name, now, now),
     )
 
 
@@ -105,10 +130,10 @@ def deactivate_skill(conn: sqlite3.Connection, session_id: int, name: str) -> bo
 
 
 def session_skills(conn: sqlite3.Connection, session_id: int) -> list[str]:
-    """按生效顺序返回会话里生效中的 skill 名（用户退出过的不算）。"""
+    """返回会话里生效中的 skill 名，最近用过的在前（第一个就是「主导」）。"""
     rows = conn.execute(
         "SELECT skill_name FROM session_skills WHERE session_id = ? AND suppressed_at IS NULL"
-        " ORDER BY activated_at, skill_name",
+        " ORDER BY COALESCE(last_used_at, activated_at) DESC, skill_name",
         (session_id,),
     ).fetchall()
     return [row["skill_name"] for row in rows]

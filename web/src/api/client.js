@@ -47,6 +47,8 @@ export const api = {
   listSessionSkills: (sessionId) => request('GET', `/api/sessions/${sessionId}/skills`),
   leaveSessionSkill: (sessionId, name) =>
     request('DELETE', `/api/sessions/${sessionId}/skills/${encodeURIComponent(name)}`),
+  setPrimarySkill: (sessionId, name) =>
+    request('POST', `/api/sessions/${sessionId}/skills/${encodeURIComponent(name)}/primary`),
 
   getModel: () => request('GET', '/api/settings/model'),
   putModel: (patch) => request('PUT', '/api/settings/model', patch),

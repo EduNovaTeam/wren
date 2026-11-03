@@ -78,6 +78,15 @@ def deactivate_session_skill(session_id: int, name: str):
     return {"skills": _session_skill_payload(session_id)}
 
 
+@bp.post("/sessions/<int:session_id>/skills/<name>/primary")
+def set_primary_session_skill(session_id: int, name: str):
+    """指定哪个 skill 是「主导」：多个都相关时按它走，其余只在它没覆盖的地方补充。"""
+    _session_or_404(session_id)
+    skill = _session_skill_or_404(name)
+    store.mark_primary(db(), session_id, skill.name)
+    return {"skills": _session_skill_payload(session_id)}
+
+
 def _session_skill_payload(session_id: int) -> list[dict]:
     """只列出真正在生效的：skill 被删掉、改坏或被设置页停用时，它会自己消失。"""
     found = skills.load_skills(skills.skill_roots(cfg()))
@@ -87,8 +96,25 @@ def _session_skill_payload(session_id: int) -> list[dict]:
         skill = found.get(name)
         if skill is None or not skills.usable(skill, switches):
             continue
-        out.append({"name": skill.name, "description": skill.description})
+        out.append(
+            {
+                "name": skill.name,
+                "description": skill.description,
+                # 排在最前的是主导，界面据此高亮
+                "primary": not out,
+            }
+        )
     return out
+
+
+def _session_skill_or_404(name: str) -> skills.Skill:
+    if not skills.NAME_RE.match(name):
+        abort(404, "没有这个 skill")
+    found = skills.load_skills(skills.skill_roots(cfg()))
+    skill = found.get(name)
+    if skill is None or not skills.usable(skill, settings.get_skill_switches(db())):
+        abort(404, "skill 不存在、有问题或已停用")
+    return skill
 
 
 @bp.post("/sessions/<int:session_id>/turns")
