@@ -10,7 +10,7 @@ import hmac
 
 from flask import Blueprint, abort, request
 
-from .. import settings, store
+from .. import settings, skills, store
 from . import cfg, db
 
 bp = Blueprint("internal", __name__, url_prefix="/internal")
@@ -40,6 +40,8 @@ def turn_context(turn_id: int):
         "model": settings.get_model(conn),
         "system_prompt": settings.get_system_prompt(conn),
         "tool_switches": settings.get_tool_switches(conn),
+        "skill_switches": skills.get_switches(conn),
+        "active_skills": skills.session_skills(conn, turn["session_id"]),
         "history": store.history(conn, turn["session_id"], turn_id),
         "user_message": {"role": "user", "content": user_message["content"]},
     }

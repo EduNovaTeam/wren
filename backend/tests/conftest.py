@@ -22,6 +22,7 @@ class FakeAgent:
         self.aborted: list[int] = []
         self.requests: list[dict] = []
         self.tools = [{"name": "echo", "description": "回显", "toggleable": True}]
+        self.skills: list[dict] = []
         agent = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -39,6 +40,8 @@ class FakeAgent:
             def do_GET(self):
                 if self.path == "/tools":
                     self._json(200, {"tools": agent.tools})
+                elif self.path == "/skills":
+                    self._json(200, {"skills": agent.skills, "errors": []})
                 else:
                     self._json(404, {})
 
