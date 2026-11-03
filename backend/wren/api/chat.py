@@ -61,6 +61,36 @@ def list_turns(session_id: int):
     return {"turns": store.list_turns(db(), session_id)}
 
 
+@bp.get("/sessions/<int:session_id>/skills")
+def list_session_skills(session_id: int):
+    """这个会话里正在生效的 skill，对话界面用它显示「生效中」并允许退出。"""
+    _session_or_404(session_id)
+    return {"skills": _session_skill_payload(session_id)}
+
+
+@bp.delete("/sessions/<int:session_id>/skills/<name>")
+def deactivate_session_skill(session_id: int, name: str):
+    """退出一个 skill 的会话级生效。立刻生效，从下一个回合起不再注入。"""
+    _session_or_404(session_id)
+    if not skills.NAME_RE.match(name):
+        abort(404, "没有这个 skill")
+    store.deactivate_skill(db(), session_id, name)
+    return {"skills": _session_skill_payload(session_id)}
+
+
+def _session_skill_payload(session_id: int) -> list[dict]:
+    """只列出真正在生效的：skill 被删掉、改坏或被设置页停用时，它会自己消失。"""
+    found = skills.load_skills(skills.skill_roots(cfg()))
+    switches = settings.get_skill_switches(db())
+    out = []
+    for name in store.session_skills(db(), session_id):
+        skill = found.get(name)
+        if skill is None or not skills.usable(skill, switches):
+            continue
+        out.append({"name": skill.name, "description": skill.description})
+    return out
+
+
 @bp.post("/sessions/<int:session_id>/turns")
 def create_turn(session_id: int):
     _session_or_404(session_id)

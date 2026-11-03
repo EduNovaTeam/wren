@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import pytest
@@ -467,3 +468,108 @@ def test_disable_is_persisted_in_settings(client, cfg, builtin_root):
         assert settings.get_skill_switches(conn) == {"good": False}
     finally:
         conn.close()
+
+
+# ---- 退出会话级生效 ----------------------------------------------------------
+
+
+def test_session_skill_list_shows_what_is_in_effect(client, builtin_root):
+    write_skill(builtin_root, "weekly-report", "name: weekly-report\ndescription: 写周报")
+    sid = client.post("/api/sessions").get_json()["id"]
+    assert client.get(f"/api/sessions/{sid}/skills").get_json() == {"skills": []}
+
+    client.post(f"/internal/sessions/{sid}/skills", json={"name": "weekly-report"}, headers=H)
+    assert client.get(f"/api/sessions/{sid}/skills").get_json()["skills"] == [
+        {"name": "weekly-report", "description": "写周报"}
+    ]
+
+
+def test_leaving_a_skill_drops_it_from_the_next_turn(client, agent, builtin_root):
+    write_skill(
+        builtin_root, "weekly-report", "name: weekly-report\ndescription: 写周报", body="# 正文"
+    )
+    sid = client.post("/api/sessions").get_json()["id"]
+    client.post(f"/internal/sessions/{sid}/skills", json={"name": "weekly-report"}, headers=H)
+
+    response = client.delete(f"/api/sessions/{sid}/skills/weekly-report")
+    assert response.status_code == 200
+    assert response.get_json()["skills"] == []
+
+    agent.script = [{"type": "_hold"}, {"type": "turn_end", "status": "done"}]
+    turn_id = _open_turn(client, sid, "继续")
+    ctx = client.get(f"/internal/turns/{turn_id}/context", headers=H).get_json()
+    assert ctx["active_skills"] == []
+
+    agent.released.set()
+    _finish(client, turn_id)
+
+
+def test_model_reading_it_again_does_not_revive_a_skill_the_user_left(client, builtin_root):
+    write_skill(builtin_root, "weekly-report", "name: weekly-report\ndescription: 写周报")
+    sid = client.post("/api/sessions").get_json()["id"]
+    client.post(f"/internal/sessions/{sid}/skills", json={"name": "weekly-report"}, headers=H)
+    client.delete(f"/api/sessions/{sid}/skills/weekly-report")
+
+    # 用户点过退出之后，模型再读一遍正文，不该把它悄悄拉回生效状态
+    again = client.post(
+        f"/internal/sessions/{sid}/skills", json={"name": "weekly-report"}, headers=H
+    )
+    assert again.status_code == 200
+    assert client.get(f"/api/sessions/{sid}/skills").get_json()["skills"] == []
+
+
+def test_slash_command_brings_a_left_skill_back(client, agent, builtin_root):
+    write_skill(builtin_root, "weekly-report", "name: weekly-report\ndescription: 写周报")
+    sid = client.post("/api/sessions").get_json()["id"]
+    client.post(f"/internal/sessions/{sid}/skills", json={"name": "weekly-report"}, headers=H)
+    client.delete(f"/api/sessions/{sid}/skills/weekly-report")
+
+    agent.script = [{"type": "turn_end", "status": "done"}]
+    created = client.post(f"/api/sessions/{sid}/turns", json={"content": "/weekly-report 再来"})
+    _finish(client, created.get_json()["turn_id"])
+
+    listed = client.get(f"/api/sessions/{sid}/skills").get_json()["skills"]
+    assert [s["name"] for s in listed] == ["weekly-report"]
+
+
+def test_left_skill_keeps_its_row_so_it_can_come_back(client, cfg, builtin_root):
+    write_skill(builtin_root, "weekly-report", "name: weekly-report\ndescription: 写周报")
+    sid = client.post("/api/sessions").get_json()["id"]
+    client.post(f"/internal/sessions/{sid}/skills", json={"name": "weekly-report"}, headers=H)
+    client.delete(f"/api/sessions/{sid}/skills/weekly-report")
+
+    conn = connect(cfg.db_path)
+    try:
+        row = conn.execute(
+            "SELECT suppressed_at FROM session_skills WHERE session_id = ? AND skill_name = ?",
+            (sid, "weekly-report"),
+        ).fetchone()
+    finally:
+        conn.close()
+    # 不是删掉而是打标记：模型随后读到它也不能复活，用户 /名字 点名才清掉
+    assert row is not None and row["suppressed_at"]
+
+
+def test_session_skill_list_hides_deleted_and_globally_disabled(client, builtin_root):
+    directory = write_skill(builtin_root, "gone", "name: gone\ndescription: 会被删")
+    write_skill(builtin_root, "off", "name: off\ndescription: 会被停用")
+    sid = client.post("/api/sessions").get_json()["id"]
+    for name in ("gone", "off"):
+        client.post(f"/internal/sessions/{sid}/skills", json={"name": name}, headers=H)
+    listed = client.get(f"/api/sessions/{sid}/skills").get_json()["skills"]
+    assert [s["name"] for s in listed] == ["gone", "off"]
+
+    shutil.rmtree(directory)
+    client.put("/api/skills/off", json={"enabled": False})
+    assert client.get(f"/api/sessions/{sid}/skills").get_json()["skills"] == []
+
+
+def test_session_skill_endpoints_need_a_real_session(client, builtin_root):
+    write_skill(builtin_root, "good", "name: good\ndescription: 正常")
+    assert client.get("/api/sessions/9999/skills").status_code == 404
+    assert client.delete("/api/sessions/9999/skills/good").status_code == 404
+
+    sid = client.post("/api/sessions").get_json()["id"]
+    # 退出一个没生效过的 skill 不算错：用户要的结果（它不生效）已经成立
+    assert client.delete(f"/api/sessions/{sid}/skills/good").status_code == 200
+    assert client.delete(f"/api/sessions/{sid}/skills/Not_Valid").status_code == 404

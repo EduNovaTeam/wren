@@ -72,7 +72,7 @@ def activate_session_skill(session_id: int):
     skill = skills.load_skills(skills.skill_roots(cfg())).get(name)
     if skill is None or not skills.usable(skill, settings.get_skill_switches(conn)):
         abort(404, "skill 不存在、有问题或已停用")
-    store.activate_skill(conn, session_id, name)
+    store.activate_skill(conn, session_id, name, explicit=False)
     return {"skills": store.session_skills(conn, session_id)}
 
 

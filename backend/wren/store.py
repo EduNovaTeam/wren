@@ -67,27 +67,47 @@ def delete_session(conn: sqlite3.Connection, session_id: int) -> bool:
 # ---- session skills -------------------------------------------------------
 
 
-def activate_skill(conn: sqlite3.Connection, session_id: int, name: str) -> None:
-    """把 skill 记为会话级生效。重复调用不改变首次生效的时间。"""
+def activate_skill(
+    conn: sqlite3.Connection, session_id: int, name: str, *, explicit: bool = True
+) -> None:
+    """把 skill 记为会话级生效。
+
+    `explicit` 区分来源：用户 `/名字` 点名（True）会清掉「已退出」的标记；模型自己
+    读到正文（False）只在该 skill 没被退出过时才生效——否则用户刚点的退出，下一句
+    被模型重新读一遍就又复活了。
+    """
+    now = utcnow()
+    if explicit:
+        conn.execute(
+            "INSERT INTO session_skills (session_id, skill_name, activated_at, suppressed_at)"
+            " VALUES (?, ?, ?, NULL)"
+            " ON CONFLICT(session_id, skill_name) DO UPDATE SET suppressed_at = NULL",
+            (session_id, name, now),
+        )
+        return
     conn.execute(
         "INSERT OR IGNORE INTO session_skills (session_id, skill_name, activated_at)"
         " VALUES (?, ?, ?)",
-        (session_id, name, utcnow()),
+        (session_id, name, now),
     )
 
 
 def deactivate_skill(conn: sqlite3.Connection, session_id: int, name: str) -> bool:
+    """用户退出一个 skill 的会话级生效。保留记录并打标记，见 `activate_skill`。"""
+    now = utcnow()
     cur = conn.execute(
-        "DELETE FROM session_skills WHERE session_id = ? AND skill_name = ?",
-        (session_id, name),
+        "INSERT INTO session_skills (session_id, skill_name, activated_at, suppressed_at)"
+        " VALUES (?, ?, ?, ?)"
+        " ON CONFLICT(session_id, skill_name) DO UPDATE SET suppressed_at = excluded.suppressed_at",
+        (session_id, name, now, now),
     )
     return cur.rowcount > 0
 
 
 def session_skills(conn: sqlite3.Connection, session_id: int) -> list[str]:
-    """按生效顺序返回会话里生效中的 skill 名。"""
+    """按生效顺序返回会话里生效中的 skill 名（用户退出过的不算）。"""
     rows = conn.execute(
-        "SELECT skill_name FROM session_skills WHERE session_id = ?"
+        "SELECT skill_name FROM session_skills WHERE session_id = ? AND suppressed_at IS NULL"
         " ORDER BY activated_at, skill_name",
         (session_id,),
     ).fetchall()
