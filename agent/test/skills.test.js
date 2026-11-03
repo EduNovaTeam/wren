@@ -185,6 +185,15 @@ test('prompt has no active skill section when the user did not name one', () => 
   assert.doesNotMatch(prompt, /用户指定本回合使用/);
 });
 
+test('prompt spells out the tools available this turn', () => {
+  const prompt = buildSystemPrompt(DEFAULT_SECTIONS, {
+    system_prompt: '',
+    visible_tools: ['current_time', 'use_skill', 'fetch_url'],
+  });
+  assert.match(prompt, /本回合可调用的工具：current_time、use_skill、fetch_url/);
+  assert.match(prompt, /以这份列表为准/);
+});
+
 test('a skill kept from earlier turns is labelled as session-scoped', () => {
   const prompt = buildSystemPrompt(DEFAULT_SECTIONS, {
     system_prompt: '',

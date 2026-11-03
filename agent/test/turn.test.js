@@ -132,8 +132,28 @@ test('a skill brings its allowed tools into the turn', async () => {
     ['add', 'wait', 'secret']);
   // 工具清单是接口参数，模型未必会翻；提示里要明说已经开放，且不能说没注册的那个
   const system = llm.requests.at(-1).messages[0].content;
+  assert.match(system, /本回合可调用的工具：add、wait、secret/);
   assert.match(system, /本回合已经开放：secret/);
   assert.doesNotMatch(system, /not_registered/);
+
+  // 同一会话里 skill 的工具必然经历「先前不可用、后来可用」。模型会死守自己更早那句
+  // 「没有这个工具」，所以要在历史之后、用户消息之前补一条本回合有效的提醒。
+  const messages = llm.requests.at(-1).messages;
+  const last = messages.at(-1);
+  const reminder = messages.at(-2);
+  assert.equal(last.role, 'user');
+  assert.equal(reminder.role, 'system');
+  assert.match(reminder.content, /工具提醒/);
+  assert.match(reminder.content, /可以直接调用 add、wait、secret/);
+  assert.match(reminder.content, /现在不成立了/);
+});
+
+test('no tool reminder when no skill brings tools', async () => {
+  llm.push({ text: 'ok' });
+  await runTurn(newTurn({}));
+  const messages = llm.requests.at(-1).messages;
+  assert.equal(messages.at(-1).role, 'user');
+  assert.ok(messages.every((m) => !String(m.content).includes('工具提醒')));
 });
 
 test('tools from a skill are gone once it is not active', async () => {

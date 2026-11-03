@@ -35,6 +35,23 @@ export const userInstructionsSection = {
 };
 
 /**
+ * 本回合可以调用哪些工具，逐个写出来。
+ *
+ * 工具定义本身会作为接口参数发给模型，但实测它会凭印象说「我没有这个工具」，
+ * 甚至读到别处的说明也照样否认。写在系统提示里、并且每回合重算，它才肯认。
+ * 单独成段而不是塞进 skill 段：塞进去会被当成 skill 自己的说法，不被当作事实。
+ * @type {PromptSection}
+ */
+export const toolsSection = {
+  id: 'tools',
+  render: (ctx) => {
+    const tools = ctx.visible_tools ?? [];
+    if (!tools.length) return null;
+    return `本回合可调用的工具：${tools.join('、')}。以这份列表为准，回合内不会变化。`;
+  },
+};
+
+/**
  * skill 的存在性提示：不列清单，只说明「有，可以查」。
  *
  * 清单本身每回合都要付 token，而多数对话一个 skill 都用不到；改成按需查询后，
@@ -108,6 +125,7 @@ export const DEFAULT_SECTIONS = [
   identitySection,
   environmentSection,
   userInstructionsSection,
+  toolsSection,
   skillsSection,
   activeSkillsSection,
 ];

@@ -54,15 +54,15 @@ export async function runTurn(ctx, deps, emit, signal) {
   // 提示里只说真正开放了的工具：skill 里写了没注册的名字（如 run_sql）不能声称为可用。
   const plainNames = new Set(deps.registry.visibleTools(ctx.tool_switches));
   const granted = new Set(visibleNames.filter((name) => !plainNames.has(name)));
-  const promptCtx = ctx.active_skills?.some((s) => s.allowed_tools?.length)
-    ? {
-        ...ctx,
-        active_skills: ctx.active_skills.map((s) => ({
-          ...s,
-          allowed_tools: (s.allowed_tools ?? []).filter((name) => granted.has(name)),
-        })),
-      }
-    : ctx;
+  const promptCtx = {
+    ...ctx,
+    // 工具清单写进系统提示，每回合重算：模型会凭印象否认某个工具存在
+    visible_tools: visibleNames,
+    active_skills: ctx.active_skills?.map((s) => ({
+      ...s,
+      allowed_tools: (s.allowed_tools ?? []).filter((name) => granted.has(name)),
+    })),
+  };
 
   const history = selectHistory(ctx.history, model.history_budget_tokens);
   /** @type {import('./types.js').ChatMessage[]} */
@@ -71,6 +71,17 @@ export async function runTurn(ctx, deps, emit, signal) {
     ...history.messages,
     ctx.user_message,
   ];
+  // skill 带来的工具只在它生效期间存在，同一会话里必然经历「先是不可用、后来可用」。
+  // 模型会拿自己更早那句「我没有这个工具」当事实，连工具清单和系统提示都推翻
+  // （实测：把它自己那两句否认从历史里删掉就能正常调用）。所以这里在用户消息前
+  // 补一条只对本回合生效的提醒：位置在历史之后才管用，写进系统提示的第一段没用。
+  if (granted.size) {
+    messages.splice(messages.length - 1, 0, {
+      role: 'system',
+      content: `工具提醒：本回合可以直接调用 ${visibleNames.join('、')}（含 skill 带来的工具）。`
+        + '如果你印象里其中某个不可用，那是更早回合的情况，现在不成立了。',
+    });
+  }
   emit({
     type: 'turn_info',
     tools: visibleNames,
