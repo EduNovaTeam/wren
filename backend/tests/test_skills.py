@@ -275,6 +275,18 @@ def test_invocation_of_broken_skill_is_rejected_with_the_reason(client, builtin_
     assert "缺少 description" in response.get_json()["error"]
 
 
+def test_invoking_by_the_folder_name_explains_the_name_mismatch(client, builtin_root):
+    """用户照着文件夹名调用时，不能只说「没有这个 skill」——目录在，只是名字写岔了。"""
+    write_skill(builtin_root, "team-conventions", "name: team-style")
+    sid = client.post("/api/sessions").get_json()["id"]
+
+    response = client.post(f"/api/sessions/{sid}/turns", json={"content": "/team-conventions 试试"})
+    assert response.status_code == 400
+    error = response.get_json()["error"]
+    assert "team-conventions" in error and "team-style" in error
+    assert "与目录名" in error
+
+
 def _cfg(data_dir: Path):
     from wren.config import Config
 

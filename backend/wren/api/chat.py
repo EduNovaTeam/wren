@@ -157,8 +157,18 @@ def _check_invocation(content: str) -> str | None:
     if not invocation:
         return None
     name = invocation[0]
-    skill = skills.load_skills(skills.skill_roots(cfg())).get(name)
+    found = skills.load_skills(skills.skill_roots(cfg()))
+    skill = found.get(name)
     if skill is None:
+        # 用户可能打的是文件夹名——设置页上就能看到路径。这时候只说「没有这个 skill」会让人
+        # 找不到北：目录明明在，只是里面写的名字不一样。把真实名字和问题一起报出来。
+        for other in found.values():
+            if other.directory.name == name:
+                abort(
+                    400,
+                    f"目录「{name}」里的 skill 声明成了「{other.name}」，两边不一致就无法使用："
+                    f"{'；'.join(other.problems)}",
+                )
         abort(400, f"没有这个 skill：{name}")
     if not skill.valid:
         abort(400, f"skill「{name}」有问题，先修好再用：{'；'.join(skill.problems)}")
