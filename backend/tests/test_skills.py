@@ -757,6 +757,38 @@ def test_a_pinned_skill_is_not_displaced_by_the_model_reading_another(client, ag
     _finish(client, turn_id)
 
 
+def test_unpinning_falls_back_to_the_most_recently_used(client, builtin_root):
+    write_skill(builtin_root, "first", "name: first\ndescription: 先用的")
+    write_skill(builtin_root, "second", "name: second\ndescription: 后用的")
+    sid = client.post("/api/sessions").get_json()["id"]
+    client.post(f"/internal/sessions/{sid}/skills", json={"name": "first"}, headers=H)
+    time.sleep(0.02)
+    client.post(f"/internal/sessions/{sid}/skills", json={"name": "second"}, headers=H)
+    client.post(f"/api/sessions/{sid}/skills/first/primary")
+
+    listed = client.get(f"/api/sessions/{sid}/skills").get_json()["skills"]
+    assert listed[0]["name"] == "first" and listed[0]["pinned"] is True
+
+    # 再点一次取消指定：不再固定在 first 上。它仍然是主导，但那是因为它刚被用过，
+    # 属于「自动」而不是「用户指定」，模型下次读别的 skill 就能把它带过去。
+    response = client.delete(f"/api/sessions/{sid}/skills/first/primary")
+    assert response.status_code == 200
+    after = response.get_json()["skills"]
+    assert after[0]["name"] == "first" and after[0]["pinned"] is False
+
+    client.post(f"/internal/sessions/{sid}/skills", json={"name": "second"}, headers=H)
+    auto = client.get(f"/api/sessions/{sid}/skills").get_json()["skills"]
+    assert auto[0]["name"] == "second" and auto[0]["pinned"] is False
+
+
+def test_unpinning_an_unknown_or_invalid_skill_is_404(client, builtin_root):
+    write_skill(builtin_root, "good", "name: good\ndescription: 正常")
+    sid = client.post("/api/sessions").get_json()["id"]
+    assert client.delete(f"/api/sessions/{sid}/skills/nope/primary").status_code == 404
+    # 没指定过也能调，幂等
+    assert client.delete(f"/api/sessions/{sid}/skills/good/primary").status_code == 200
+
+
 def test_naming_another_skill_takes_over_from_the_pinned_one(client, agent, builtin_root):
     write_skill(builtin_root, "lead", "name: lead\ndescription: 用户选的主导", body="# 主导正文")
     write_skill(builtin_root, "other", "name: other\ndescription: 另一个", body="# 另一个正文")

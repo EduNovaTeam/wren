@@ -64,11 +64,16 @@ async function leaveSkill(name) {
   }
 }
 
-/** 指定主导：多个 skill 都相关时按它走，其余只在它没覆盖的地方补充。 */
-/** @param {string} name */
-async function makePrimary(name) {
+/**
+ * 点 chip 上的名字切换「指定」状态：
+ * 没指定过 → 指定它为主导；指定着的 → 取消，改回按最近使用自动决定。
+ * @param {{ name: string, pinned: boolean }} skill
+ */
+async function togglePrimary(skill) {
   try {
-    const data = await api.setPrimarySkill(props.sessionId, name);
+    const data = skill.pinned
+      ? await api.clearPrimarySkill(props.sessionId, skill.name)
+      : await api.setPrimarySkill(props.sessionId, skill.name);
     activeSkills.value = data.skills;
   } catch (err) {
     error.value = err.message;
@@ -172,20 +177,20 @@ function scrollToBottom() {
           :class="{ primary: s.primary }"
           :title="
             s.pinned
-              ? `${s.description}（你指定的主导）`
+              ? `${s.description}（你指定的主导，再点一下取消指定）`
               : s.primary
-                ? `${s.description}（当前主导，点别的可以换）`
+                ? `${s.description}（当前按最近使用排在前面，点一下固定它）`
                 : `点击设为主导 · ${s.description}`
           "
         >
           <button
             class="chip-name"
-            :disabled="s.primary"
-            :aria-label="`把 ${s.name} 设为主导`"
-            @click="makePrimary(s.name)"
+            :aria-label="s.pinned ? `取消 ${s.name} 的主导指定` : `把 ${s.name} 设为主导`"
+            @click="togglePrimary(s)"
           >
             <code>{{ s.name }}</code>
-            <span v-if="s.primary" class="chip-tag">主导</span>
+            <span v-if="s.pinned" class="chip-tag">主导</span>
+            <span v-else-if="s.primary" class="chip-tag auto">自动</span>
           </button>
           <button class="chip-close" :aria-label="`退出 ${s.name}`" @click="leaveSkill(s.name)">×</button>
         </span>

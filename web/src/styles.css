@@ -84,6 +84,7 @@ textarea { resize: vertical; width: 100%; }
 .skill-chip .chip-name:not(:disabled) { color: var(--muted); }
 .skill-chip .chip-name:not(:disabled):hover { color: var(--fg); background: #fff; }
 .skill-chip .chip-tag { font-size: 11px; color: #fff; background: var(--accent, #3b82f6); border-radius: 8px; padding: 0 5px; }
+.skill-chip .chip-tag.auto { background: var(--muted); }
 .skill-chip .chip-close { border: none; background: none; color: var(--muted); padding: 0 5px; line-height: 1.4; font-size: 15px; border-radius: 50%; }
 .skill-chip .chip-close:hover { color: var(--danger); background: #fff; }
 

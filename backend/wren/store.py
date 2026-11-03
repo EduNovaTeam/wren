@@ -149,6 +149,14 @@ def session_skills(conn: sqlite3.Connection, session_id: int) -> list[str]:
     return [row["skill_name"] for row in rows]
 
 
+def clear_pin(conn: sqlite3.Connection, session_id: int, name: str) -> None:
+    """取消「主导」指定：改回按最近使用自动决定，用户想反悔时用。"""
+    conn.execute(
+        "UPDATE session_skills SET pinned_at = NULL WHERE session_id = ? AND skill_name = ?",
+        (session_id, name),
+    )
+
+
 def pinned_skill(conn: sqlite3.Connection, session_id: int) -> str | None:
     """用户明确指定为主导的 skill（没有则为 None）。
 

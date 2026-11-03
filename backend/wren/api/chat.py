@@ -87,6 +87,15 @@ def set_primary_session_skill(session_id: int, name: str):
     return {"skills": _session_skill_payload(session_id)}
 
 
+@bp.delete("/sessions/<int:session_id>/skills/<name>/primary")
+def clear_primary_session_skill(session_id: int, name: str):
+    """取消指定：改回按最近使用自动决定，不用再猜用户要哪个。"""
+    _session_or_404(session_id)
+    skill = _session_skill_or_404(name)
+    store.clear_pin(db(), session_id, skill.name)
+    return {"skills": _session_skill_payload(session_id)}
+
+
 def _session_skill_payload(session_id: int) -> list[dict]:
     """只列出真正在生效的：skill 被删掉、改坏或被设置页停用时，它会自己消失。"""
     found = skills.load_skills(skills.skill_roots(cfg()))
