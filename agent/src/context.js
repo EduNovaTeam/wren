@@ -90,7 +90,9 @@ export const activeSkillsSection = {
     const primary = active.filter((skill) => (skill.role ?? 'primary') === 'primary');
     const waiting = active.filter((skill) => skill.role === 'secondary');
     const blocks = [];
-    if (primary.length + waiting.length > 1) blocks.push(choiceRules(primary, waiting));
+    if (primary.length + waiting.length > 1) {
+      blocks.push(choiceRules(primary, waiting, primary.some((s) => s.pinned)));
+    }
     for (const skill of primary) blocks.push(renderActive(skill, active.length > 1));
     for (const skill of waiting) blocks.push(renderWaiting(skill));
     return blocks.join('\n\n');
@@ -102,13 +104,25 @@ export const activeSkillsSection = {
  * 消息都生效」，模型会把几套做法混在一起用。
  * @param {any[]} primary
  * @param {any[]} waiting
+ * @param {boolean} pinned 主导是用户自己点的
  */
-function choiceRules(primary, waiting) {
+function choiceRules(primary, waiting, pinned) {
   const lead = primary.map((s) => `「${s.name}」`).join('、');
   const rest = waiting.map((s) => `「${s.name}」`).join('、');
+  const head = `本会话有 ${primary.length + waiting.length} 个 skill 生效：`
+    + `${lead}${rest ? `、${rest}` : ''}。`;
+  if (pinned) {
+    // 用户明确指定过主导，就不能让它按「哪个更相关」被换掉：用户点这个就是为了定下来
+    return [
+      `${head}「${primary[0].name}」是用户自己指定的主导，不是你挑的。按这个来：`,
+      `1. 这条消息能套用「${primary[0].name}」时，就用它，不要自己换成别的 skill；`
+        + '你觉得别的更合适，先问一句要不要换；',
+      `2. 这条消息和「${primary[0].name}」完全无关时，照常回答，别硬套；`,
+      '3. 主导管不到的地方可以用待命的 skill 补充，但先把它的正文读出来（use_skill），别凭名字猜。',
+    ].join('\n');
+  }
   return [
-    `本会话有 ${primary.length + waiting.length} 个 skill 生效：${lead}${rest ? `、${rest}` : ''}。`
-      + '用哪个按这个顺序判断：',
+    `${head}用哪个按这个顺序判断：`,
     '1. 只有一个和这条消息直接相关时，就用它，不用管其它几个；',
     `2. 多个都相关时，用主导的${lead}，其它只在它没覆盖的地方补充，别把两套做法或两种格式混在一起；`,
     '3. 实在分不清用户要按哪个，先问一句，别猜；',
@@ -124,9 +138,13 @@ function choiceRules(primary, waiting) {
 function renderActive(skill, contested) {
   const parts = [];
   if (skill.reason === 'session') {
+    const label = skill.pinned
+      ? `用户指定了这个对话的主导 skill「${skill.name}」`
+      : contested
+        ? `主导的 skill「${skill.name}」`
+        : `本会话已启用 skill「${skill.name}」`;
     parts.push(
-      `${contested ? '主导的 skill' : '本会话已启用 skill'}「${skill.name}」`
-        + `，它对之后每条消息都生效，即使消息里没有 /${skill.name}`
+      `${label}，它对之后每条消息都生效，即使消息里没有 /${skill.name}`
         + ' 命令也照样按它处理。下面是当前生效的做法：',
       skill.body,
     );

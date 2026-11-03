@@ -60,6 +60,7 @@ def turn_context(turn_id: int):
             available,
             store.session_skills(conn, turn["session_id"]),
             switches,
+            store.pinned_skill(conn, turn["session_id"]),
         ),
         "history": store.history(conn, turn["session_id"], turn_id),
         "user_message": {"role": "user", "content": user_message["content"]},
@@ -87,12 +88,16 @@ def _active_skills(
     available: dict[str, skills.Skill],
     session_names: list[str],
     switches: dict[str, bool],
+    pinned: str | None = None,
 ) -> list[dict]:
     """本回合要注入哪些 skill：一个「主导」带正文，其余「待命」只给一句话。
 
     多个 skill 同时生效时，全量注入正文会让模型把几套做法混着用。所以只给主导的正文；
     待命的保留名字和描述，需要时模型自己 use_skill 去读。它们的 allowed-tools 仍然
     全部开放，不会出现「读了正文还要等下一回合」。
+
+    `pinned` 是用户明确指定为主导的那个：它和「最近使用」不一样，模型读了别的 skill
+    也不会把它换掉。`session_names` 已经把指定的排在前面，这里只负责标出来。
     """
     out: list[dict] = []
     seen: set[str] = set()
@@ -101,7 +106,7 @@ def _active_skills(
     if invocation:
         skill = available.get(invocation[0])
         if skill is not None and skills.usable(skill, switches):
-            out.append(_payload(skill, "invoked", "primary"))
+            out.append(_payload(skill, "invoked", "primary", pinned=False))
             seen.add(skill.name)
 
     for name in session_names:
@@ -111,13 +116,14 @@ def _active_skills(
         # skill 可能已经被删掉、改坏或被用户停用，跳过即可，不要让整个回合失败
         if skill is None or not skills.usable(skill, switches):
             continue
-        # 没有点名时，最近用过的那个（排在最前）是主导
-        out.append(_payload(skill, "session", "secondary" if out else "primary"))
+        # 没有点名时，排在最前的就是主导（用户指定过的优先）
+        role = "secondary" if out else "primary"
+        out.append(_payload(skill, "session", role, pinned=role == "primary" and name == pinned))
         seen.add(name)
     return out
 
 
-def _payload(skill: skills.Skill, reason: str, role: str) -> dict:
+def _payload(skill: skills.Skill, reason: str, role: str, *, pinned: bool = False) -> dict:
     return {
         "name": skill.name,
         "description": skill.description,
@@ -127,4 +133,6 @@ def _payload(skill: skills.Skill, reason: str, role: str) -> dict:
         "allowed_tools": list(skill.allowed_tools),
         "reason": reason,
         "role": role,
+        # 用户明确指定为主导：提示里要说得更硬，不能让它按「最近使用」被换掉
+        "pinned": pinned,
     }

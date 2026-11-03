@@ -170,7 +170,13 @@ function scrollToBottom() {
           :key="s.name"
           class="skill-chip"
           :class="{ primary: s.primary }"
-          :title="s.primary ? `${s.description}（主导）` : `点击设为主导 · ${s.description}`"
+          :title="
+            s.pinned
+              ? `${s.description}（你指定的主导）`
+              : s.primary
+                ? `${s.description}（当前主导，点别的可以换）`
+                : `点击设为主导 · ${s.description}`
+          "
         >
           <button
             class="chip-name"

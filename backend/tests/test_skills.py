@@ -487,7 +487,7 @@ def test_session_skill_list_shows_what_is_in_effect(client, builtin_root):
 
     client.post(f"/internal/sessions/{sid}/skills", json={"name": "weekly-report"}, headers=H)
     assert client.get(f"/api/sessions/{sid}/skills").get_json()["skills"] == [
-        {"name": "weekly-report", "description": "写周报", "primary": True}
+        {"name": "weekly-report", "description": "写周报", "primary": True, "pinned": False}
     ]
 
 
@@ -718,7 +718,63 @@ def test_user_can_pick_the_primary_skill(client, builtin_root):
     response = client.post(f"/api/sessions/{sid}/skills/first/primary")
     assert response.status_code == 200
     after = response.get_json()["skills"]
-    assert [(s["name"], s["primary"]) for s in after] == [("first", True), ("second", False)]
+    assert [(s["name"], s["primary"], s["pinned"]) for s in after] == [
+        ("first", True, True),
+        ("second", False, False),
+    ]
 
     # 点名一个不认识或已经坏掉的，照旧 404
     assert client.post(f"/api/sessions/{sid}/skills/nope/primary").status_code == 404
+
+
+def test_a_pinned_skill_is_not_displaced_by_the_model_reading_another(client, agent, builtin_root):
+    """用户点了主导，模型读了一次别的 skill——主导不能因此换人。"""
+    write_skill(builtin_root, "lead", "name: lead\ndescription: 用户选的主导", body="# 主导正文")
+    write_skill(builtin_root, "other", "name: other\ndescription: 另一个", body="# 另一个正文")
+    sid = client.post("/api/sessions").get_json()["id"]
+    client.post(f"/internal/sessions/{sid}/skills", json={"name": "lead"}, headers=H)
+    time.sleep(0.02)
+    client.post(f"/internal/sessions/{sid}/skills", json={"name": "other"}, headers=H)
+    client.post(f"/api/sessions/{sid}/skills/lead/primary")
+
+    # 模型在回合里读了 other，会刷新它的最近使用时间
+    client.post(f"/internal/sessions/{sid}/skills", json={"name": "other"}, headers=H)
+
+    listed = client.get(f"/api/sessions/{sid}/skills").get_json()["skills"]
+    assert [(s["name"], s["primary"], s["pinned"]) for s in listed] == [
+        ("lead", True, True),
+        ("other", False, False),
+    ]
+
+    agent.script = [{"type": "_hold"}, {"type": "turn_end", "status": "done"}]
+    turn_id = _open_turn(client, sid, "随便问")
+    skills_ctx = _turn_skills(client, turn_id)
+    assert [s["name"] for s in skills_ctx] == ["lead", "other"]
+    assert skills_ctx[0]["pinned"] is True
+    assert skills_ctx[0]["body"] == "# 主导正文"
+
+    agent.released.set()
+    _finish(client, turn_id)
+
+
+def test_naming_another_skill_takes_over_from_the_pinned_one(client, agent, builtin_root):
+    write_skill(builtin_root, "lead", "name: lead\ndescription: 用户选的主导", body="# 主导正文")
+    write_skill(builtin_root, "other", "name: other\ndescription: 另一个", body="# 另一个正文")
+    sid = client.post("/api/sessions").get_json()["id"]
+    for name in ("lead", "other"):
+        client.post(f"/internal/sessions/{sid}/skills", json={"name": name}, headers=H)
+    client.post(f"/api/sessions/{sid}/skills/lead/primary")
+
+    # 用户改口点名别的 skill：指定让位，按最近使用排
+    agent.script = [{"type": "_hold"}, {"type": "turn_end", "status": "done"}]
+    turn_id = _open_turn(client, sid, "/other 用这个")
+    skills_ctx = _turn_skills(client, turn_id)
+    assert [s["name"] for s in skills_ctx] == ["other", "lead"]
+    assert [s["role"] for s in skills_ctx] == ["primary", "secondary"]
+    assert skills_ctx[0]["pinned"] is False
+
+    agent.released.set()
+    _finish(client, turn_id)
+
+    listed = client.get(f"/api/sessions/{sid}/skills").get_json()["skills"]
+    assert listed[0]["name"] == "other" and listed[0]["pinned"] is False

@@ -264,6 +264,42 @@ test('several active skills get a rule for picking one, and only the lead brings
   assert.match(prompt, /use_skill\(\{ name: 'tech-doc-writing' \}\)/);
 });
 
+test('a lead the user pinned must not be swapped by the model', () => {
+  const prompt = buildSystemPrompt(DEFAULT_SECTIONS, {
+    system_prompt: '',
+    skills: LIST,
+    active_skills: [
+      {
+        name: 'weekly-report',
+        description: '按团队模板撰写个人周报。',
+        body: '# 写周报',
+        files: [],
+        allowed_tools: [],
+        reason: 'session',
+        role: 'primary',
+        pinned: true,
+      },
+      {
+        name: 'meeting-minutes',
+        description: '整理会议纪要。',
+        body: '',
+        files: [],
+        allowed_tools: [],
+        reason: 'session',
+        role: 'secondary',
+      },
+    ],
+  });
+  // 用户点了这个主导，模型不能因为「另一个更相关」就自己换掉
+  assert.match(prompt, /「weekly-report」是用户自己指定的主导/);
+  assert.match(prompt, /不要自己换成别的 skill/);
+  assert.match(prompt, /先问一句要不要换/);
+  assert.match(prompt, /完全无关时，照常回答，别硬套/);
+  assert.match(prompt, /用户指定了这个对话的主导 skill「weekly-report」/);
+  // 「只有一个相关就用它」会给出换人的口子，指定过主导时不能保留这条
+  assert.doesNotMatch(prompt, /只有一个和这条消息直接相关时/);
+});
+
 test('a single active skill keeps the plain wording without the rule block', () => {
   const prompt = buildSystemPrompt(DEFAULT_SECTIONS, {
     system_prompt: '',

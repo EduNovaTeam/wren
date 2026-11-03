@@ -91,17 +91,20 @@ def _session_skill_payload(session_id: int) -> list[dict]:
     """只列出真正在生效的：skill 被删掉、改坏或被设置页停用时，它会自己消失。"""
     found = skills.load_skills(skills.skill_roots(cfg()))
     switches = settings.get_skill_switches(db())
+    pinned = store.pinned_skill(db(), session_id)
     out = []
     for name in store.session_skills(db(), session_id):
         skill = found.get(name)
         if skill is None or not skills.usable(skill, switches):
             continue
+        # 排在最前的是主导，界面据此高亮；pinned 表示这是用户自己点的，不是按最近使用推出来的
+        primary = not out
         out.append(
             {
                 "name": skill.name,
                 "description": skill.description,
-                # 排在最前的是主导，界面据此高亮
-                "primary": not out,
+                "primary": primary,
+                "pinned": primary and name == pinned,
             }
         )
     return out
