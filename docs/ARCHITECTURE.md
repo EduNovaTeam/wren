@@ -74,7 +74,7 @@ skill 是「怎么把一类事做好」的做法，写在 `skills/<名字>/SKILL
 - **来源**：仓库内置 `skills/`，以及 `<data_dir>/skills/`（用户本地，不入库）。同名时用户的覆盖内置的。
 - **按需加载**：系统提示里只留一句「有可用的 skill，需要时查」，不列清单。清单（名字 + 描述）由 `use_skill` 不带参数时向 `GET /internal/skills` 取，正文由 `use_skill(name)` 向 `GET /internal/skills/<name>` 取。用不到的 skill 一个字符都不占上下文；提示本身也不随 skill 数量变化，对前缀缓存友好。代价是发现要靠模型主动调用一次。
 - **附带文件**：说明里引用的模板、规范通过 `use_skill({ name, file })` 读，落到 `GET /internal/skills/<name>/files/<路径>`。
-- **不越界**：读取时按 realpath 校验，路径必须留在该 skill 目录内；指向目录外的符号链接不算它的内容。
+- **不越界**：skill 是外部内容，只能读它自己目录里的东西。读取时按 realpath 校验，路径必须留在该 skill 目录内；链接一律不跟——符号链接和 Windows 的目录联接都算，靠比较 `lstat` 与 `stat` 的 inode 判断（比 `resolve()` 的字符串可靠：Windows 上 `resolve()` 返回磁盘上的真实大小写，`skill.md` 会被误判）。目录本身是链接的 skill 记成「有问题」并在设置页显示目标路径，不加载；`SKILL.md` 是链接同样不读。`list_files` 是逐层遍历而不是 `rglob`：一个指回自己的目录联接会让 `rglob` 原地打转，把同一个文件名刷出几十遍发给模型。
 - **发现放在后端**：设置页要列出全部 skill 与问题，而 agent 不保存状态，所以由后端解析文件、校验 frontmatter，有问题的 skill 不下发给模型。
 - **启用与停用**：设置页可以逐个开关，开关存在 settings 表的 `skills` 键里（`{名字: true/false}`），没配过的按启用处理，所以新增 skill 不用写配置。停用是全局且立刻生效的：`/internal/skills` 不再列出它，`GET /internal/skills/<name>` 直接 404，`/名字` 会在创建回合前被 400 挡下。停用**不**删除 `session_skills` 里的记录——它只是暂时不参与，重新启用后之前用过的 skill 立刻恢复，用户不必再点名一次。有问题的 skill 不允许启用（本来也不会交给模型，启用它没有意义），设置页把 checkbox 置灰并列出 `problems` 与目录路径，好让人直接去改那个文件。
 - **主动指定**：消息以 `/skill-name` 开头时，后端在创建回合前解析并校验（不存在或有问题的直接 400，不留下半截回合），回合上下文带上该 skill 的正文（`active_skills`），系统提示里直接出现，模型本回合不必再查一次。用户原样输入的内容照旧落库，前端不用改写显示。命令后必须跟空白或行尾，所以 `/usr/bin/env …` 不会被误判成调用 `usr`。

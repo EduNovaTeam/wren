@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import shutil
+import subprocess
 import time
 from pathlib import Path
 
@@ -116,6 +118,67 @@ def test_skill_without_skill_md_is_ignored(builtin_root):
 
 
 # ---- 读取附带文件 -------------------------------------------------------------
+
+
+def _make_dir_link(link: Path, target: Path) -> bool:
+    """建一个目录链接。Windows 上普通权限建不了符号链接，改用目录联接（效果一样）。"""
+    try:
+        link.symlink_to(target, target_is_directory=True)
+        return True
+    except (OSError, NotImplementedError):
+        if os.name != "nt":
+            return False
+    result = subprocess.run(
+        ["cmd", "/c", "mklink", "/J", str(link), str(target)],
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0
+
+
+def test_links_inside_a_skill_are_not_followed(builtin_root):
+    """skill 是外部内容：顺着链接就能读根目录外的文件、或者原地转圈，都不允许。"""
+    directory = write_skill(builtin_root, "linked", "name: linked\ndescription: 带链接")
+    (directory / "notes.md").write_text("自己的文件", encoding="utf-8")
+    outside_dir = builtin_root.parent / "outside"
+    outside_dir.mkdir()
+    (outside_dir / "secret.txt").write_text("外面的机密", encoding="utf-8")
+    if not _make_dir_link(directory / "secret", outside_dir):
+        pytest.skip("这个环境建不了目录链接")
+    try:
+        if _make_dir_link(directory / "self", directory):
+            pass  # 自指链接是关键用例：遍历不能原地打转
+        skill = skills.load_skills([("builtin", builtin_root)])["linked"]
+        # 链接目录里的东西不算它的内容，指回自己的链接不能让遍历原地打转
+        assert skills.list_files(skill) == ["notes.md"]
+        with pytest.raises(skills.SkillError):
+            skills.read_file(skill, "secret/secret.txt")
+    finally:
+        # 留着自指链接会让 pytest 清理临时目录时跟着它递归进去，慢到以分钟计
+        for link in (directory / "self", directory / "secret"):
+            if link.exists() or link.is_symlink():
+                os.rmdir(link)
+
+
+def test_a_skill_directory_that_is_a_link_is_reported_instead_of_loaded(builtin_root):
+    """指向根目录外的 skill 目录记成「有问题」，不能当成正常 skill 读。"""
+    outside = builtin_root.parent / "elsewhere"
+    outside.mkdir()
+    (outside / "SKILL.md").write_text(
+        "---\nname: sneaky\ndescription: 目录本身是链接\n---\n\n正文\n", encoding="utf-8"
+    )
+    (outside / "notes.md").write_text("链接目录里的东西", encoding="utf-8")
+    if not _make_dir_link(builtin_root / "sneaky", outside):
+        pytest.skip("这个环境建不了目录链接")
+    try:
+        skill = skills.load_skills([("builtin", builtin_root)])["sneaky"]
+        assert skill.valid is False
+        assert "链接" in skill.problems[0]
+        assert skill.body == ""
+        with pytest.raises(skills.SkillError):
+            skills.read_file(skill, "notes.md")
+    finally:
+        os.rmdir(builtin_root / "sneaky")
 
 
 def test_read_file_returns_content_and_blocks_escape(builtin_root):

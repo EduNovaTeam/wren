@@ -82,7 +82,12 @@ def parse_invocation(text: str) -> tuple[str, str] | None:
 
 
 def load_skills(roots: list[tuple[str, Path]]) -> dict[str, Skill]:
-    """扫描所有来源，按 skill 名索引。目录或 `SKILL.md` 缺失的条目直接跳过。"""
+    """扫描所有来源，按 skill 名索引。目录或 `SKILL.md` 缺失的条目直接跳过。
+
+    指向根目录之外的链接不当作 skill 加载。skill 是外部内容，允许它顺着链接把根目录
+    外面的文件读进来，等于把「只能读自己目录」这条边界交出去。这类条目记成「有问题」
+    而不是静默跳过，用户在设置页能看到发生了什么。
+    """
     found: dict[str, Skill] = {}
     for source, root in roots:
         if not root.is_dir():
@@ -90,10 +95,28 @@ def load_skills(roots: list[tuple[str, Path]]) -> dict[str, Skill]:
         for entry in sorted(root.iterdir()):
             if not entry.is_dir() or not (entry / SKILL_FILE).is_file():
                 continue
+            if _is_link(entry):
+                found[entry.name] = _broken(entry, source, f"目录链接到了 {entry.resolve()}")
+                continue
             skill = _load_one(entry, source)
             if skill is not None:
                 found[skill.name] = skill
     return found
+
+
+def _is_link(path: Path) -> bool:
+    """`path` 自己是不是链接（符号链接，或 Windows 的目录联接）。
+
+    比 inode 而不是比 `resolve()` 出来的字符串：Windows 上 `resolve()` 返回磁盘上的
+    真实大小写，文件万一叫 `skill.md`，字符串比较会把它误判成链接。
+    """
+    try:
+        followed = path.stat()
+        own = path.lstat()
+    except OSError:
+        # stat 失败多半是断掉的链接，同样不能读
+        return True
+    return (own.st_dev, own.st_ino) != (followed.st_dev, followed.st_ino)
 
 
 def sorted_skills(skills: dict[str, Skill]) -> list[Skill]:
@@ -115,24 +138,35 @@ def usable(skill: Skill, switches: dict[str, bool]) -> bool:
 
 
 def list_files(skill: Skill) -> list[str]:
-    """skill 目录内的附带文件（相对路径，用 `/` 分隔）。"""
+    """skill 目录内的附带文件（相对路径，用 `/` 分隔）。
+
+    一层层走过去并跳过链接。用 `rglob` 时，一个指回自己的目录联接会让它原地打转，
+    把同一个文件名刷出几十遍——这些名字是要发给模型的，等于喂进去一堆垃圾。
+    """
+    if not skill.valid:
+        # 和 read_file 一样：有问题的 skill 一律不给内容，包括目录本身是链接的情况
+        return []
     base = skill.directory.resolve()
     out: list[str] = []
-    for path in sorted(base.rglob("*")):
-        if len(out) >= LIST_LIMIT:
-            break
-        if not path.is_file() or path.name == SKILL_FILE:
-            continue
-        resolved = path.resolve()
-        # 指向目录外的符号链接不算这个 skill 的内容。
-        if not resolved.is_relative_to(base):
-            continue
-        out.append(resolved.relative_to(base).as_posix())
-    return out
+    stack = [base]
+    while stack and len(out) < LIST_LIMIT:
+        current = stack.pop()
+        for path in sorted(current.iterdir()):
+            if _is_link(path):
+                continue
+            if path.is_dir():
+                stack.append(path)
+            elif path.is_file() and path.name != SKILL_FILE:
+                out.append(path.relative_to(base).as_posix())
+    return sorted(out)
 
 
 def read_file(skill: Skill, relative: str) -> dict[str, Any]:
     """读取 skill 目录内的一个文本文件；越出目录、不存在、非文本都抛 SkillError。"""
+    # 有问题的 skill 连正文都不给读（目录是链接、SKILL.md 是链接都算），
+    # 免得绕开列表直接按名字取文件。
+    if not skill.valid:
+        raise SkillError(f"skill 有问题，先修好再读：{'；'.join(skill.problems)}")
     if not relative or relative.startswith(("/", "\\")):
         raise SkillError("路径必须是 skill 目录内的相对路径")
     base = skill.directory.resolve()
@@ -157,6 +191,9 @@ def read_file(skill: Skill, relative: str) -> dict[str, Any]:
 
 def _load_one(directory: Path, source: str) -> Skill | None:
     path = directory / SKILL_FILE
+    # 正文文件也可以是链接。链出去就等于把目录外的文件当成 skill 念给模型听。
+    if _is_link(path):
+        return _broken(directory, source, f"{SKILL_FILE} 是链接，不读取目录之外的内容")
     try:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
