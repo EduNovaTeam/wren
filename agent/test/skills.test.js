@@ -67,6 +67,21 @@ test('use_skill returns the body and marks the skill active for the session', as
   ]);
 });
 
+test('reading a skill that brings tools says they start next turn', async () => {
+  const backend = fakeBackend({
+    skill: { ...SKILL, allowed_tools: ['fetch_url', 'run_sql'] },
+  });
+  const text = await useSkill.execute({ name: 'weekly-report' }, ctx(backend));
+  assert.match(text, /这个 skill 声明的工具：fetch_url、run_sql/);
+  assert.match(text, /从下一回合起才能调用/);
+});
+
+test('a skill without tools says nothing about them', async () => {
+  const backend = fakeBackend({ skill: { ...SKILL, allowed_tools: [] } });
+  const text = await useSkill.execute({ name: 'weekly-report' }, ctx(backend));
+  assert.doesNotMatch(text, /声明的工具/);
+});
+
 test('reading an attached file does not re-activate the skill', async () => {
   const backend = fakeBackend();
   await useSkill.execute({ name: 'weekly-report', file: 'references/template.md' }, ctx(backend));

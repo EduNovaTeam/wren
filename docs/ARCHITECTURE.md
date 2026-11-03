@@ -19,7 +19,7 @@
 1. **后端是唯一的持久化层。** agent 进程不保存任何跨回合状态，可以随时重启；工具需要读写数据时调用后端的 `/internal/*` 接口。
 2. **回合记录是完整的。** 每个回合保存用户消息，以及 agent 产生的每一条 assistant / tool 消息，字段与 Chat Completions 一致（包括 `reasoning_content`、`tool_calls`）。思考模式下带 `tools` 的请求必须回传历史上的 `reasoning_content`，所以不能只存正文。
 3. **历史按预算截断。** agent 从最新的回合往前取，放不下的回合整回合丢弃（`context.js` 的 `selectHistory`）；预算在「设置 → 模型 → 历史预算」，按估算 token 计。被丢弃的回合模型看不到，界面会提示。
-4. **工具可见列表在回合开始时确定。** `ToolRegistry.visibleTools()` 按设置页的开关算出本回合的工具，整个回合内不变，同一份列表既决定发给模型的 `tools` 参数，也决定 `runTool` 允许执行哪些工具。
+4. **工具可见列表在回合开始时确定。** `ToolRegistry.visibleTools()` 按设置页的开关算出本回合的工具，再加上生效中 skill 的 `allowed-tools` 声明的工具；整个回合内不变，同一份列表既决定发给模型的 `tools` 参数，也决定 `runTool` 允许执行哪些工具。回合中间才读到的 skill，它带的工具要到下一回合才出现。
 5. **单用户、无登录。** 后端只监听 127.0.0.1。
 6. **同一会话同时只有一个进行中的回合。** 第二个请求返回 409。
 7. **后端单进程运行。** 回合运行器在进程内存里（`turns.py`），不支持多 worker。
@@ -78,6 +78,7 @@ skill 是「怎么把一类事做好」的做法，写在 `skills/<名字>/SKILL
 - **发现放在后端**：设置页要列出全部 skill 与问题，而 agent 不保存状态，所以由后端解析文件、校验 frontmatter，有问题的 skill 不下发给模型。
 - **主动指定**：消息以 `/skill-name` 开头时，后端在创建回合前解析并校验（不存在或有问题的直接 400，不留下半截回合），回合上下文带上该 skill 的正文（`active_skills`），系统提示里直接出现，模型本回合不必再查一次。用户原样输入的内容照旧落库，前端不用改写显示。命令后必须跟空白或行尾，所以 `/usr/bin/env …` 不会被误判成调用 `usr`。
 - **跨回合生效**：skill 用过一次就一直在。用户 `/skill-name` 点名的、以及模型用 `use_skill(name)` 读到正文的，都会记进 `session_skills`（`003_session_skills.sql`），之后每个回合的上下文都把正文带上，来源标为 `session`。注入时明说「对之后每条消息都生效、不必再写命令」——只写「继续按它说的做」时，模型会退回按正文里的适用条件判断，于是没有命令前缀的下一句被当成普通聊天，看起来像没生效。skill 后来被删掉或改坏时跳过，不让回合失败。目前没有取消生效的入口，删掉会话即清空。
+- **自带工具**：skill 用 frontmatter 的 `allowed-tools` 声明它需要的工具（空格或逗号分隔，如 `fetch_url`）。这些工具只在它生效时才对模型开放，没生效时模型连工具定义都看不到；反过来 `default` 类工具的开关始终归用户管，skill 不能替用户打开被关掉的工具。声明了没注册的工具名直接忽略，不让回合失败。回合中间用 `use_skill` 读到的 skill，它的工具从下一回合起才出现——回合内工具集不变这条不破例，`use_skill` 的结果里会说明这一点。
 - 系统提示里与 skill 有关的两段都排在最后（`context.js` 的 `skillsSection` 与 `activeSkillsSection`）：前者是固定文案，后者随每条消息变化，靠后能少破坏前缀缓存。
 
 ## 扩展点
@@ -95,7 +96,7 @@ skill 是「怎么把一类事做好」的做法，写在 `skills/<名字>/SKILL
 - 新工具：写一个 `ToolDefinition`（`tools/registry.js` 有字段说明），在 `tools/index.js` 注册。
   - `execute(args, ctx)`：`ctx.backend.request()` 调后端，`ctx.signal` 用于停止 / 超时，`ctx.emit()` 发自定义事件。
   - 返回字符串或可 JSON 序列化的值；抛异常会变成给模型看的错误文本，不会中断回合。
-  - `exposure: 'on-demand'`：默认不可见，也不出现在设置页（例如 `fetch_url`）。
+  - `exposure: 'on-demand'`：默认不可见，也不出现在设置页（例如 `fetch_url`），只有生效中的 skill 通过 `allowed-tools` 声明它时才对模型开放。
 - 系统提示：由 `context.js` 的 `PromptSection` 按顺序拼接（`DEFAULT_SECTIONS`）。越靠前越应该稳定，模型服务按前缀命中缓存。
 
 **web**

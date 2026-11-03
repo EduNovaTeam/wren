@@ -10,6 +10,7 @@
 - `use_skill` 可以读取 skill 目录内的附带文件（如 `references/style.md`、`assets/template.md`）；路径越出该 skill 目录会被拒绝。
 - 对话里可以用 `/skill-name` 指定本次使用某个 skill，正文直接进入系统提示；名字不存在或 skill 有问题时，发送前就会报错。
 - skill 用过一次后在后续对话里继续生效：`/skill-name` 点过，或 agent 读过它的正文，都会记为会话级生效。目前没有取消的入口，删掉会话即清空。
+- skill 可以用 `allowed-tools` 带上自己需要的工具（如 `fetch_url`），这些工具只在它生效时对模型开放；没生效时模型连工具定义都看不到。
 - `GET /api/skills` 返回全部 skill 及其校验结果；有问题的 skill 只在设置侧展示，不下发给模型。
 - skill 支持两个来源：仓库内置 `skills/` 与本地 `data/skills/`，同名时以本地为准。
 

@@ -43,6 +43,11 @@ export const useSkill = {
     if (skill.files?.length) {
       lines.push('', `附带文件（需要时带 file 参数再读）：${skill.files.join('、')}`);
     }
+    if (skill.allowed_tools?.length) {
+      // 本回合的工具清单在回合开始时已经定下，这一回合调不到，得说清楚，否则模型会试一次失败
+      lines.push('', `这个 skill 声明的工具：${skill.allowed_tools.join('、')}。`
+        + '本回合的工具清单在开局时已经定下，它们从下一回合起才能调用。');
+    }
     return lines.join('\n');
   },
 };

@@ -44,7 +44,10 @@ export async function runTurn(ctx, deps, emit, signal) {
   const model = ctx.model;
 
   // 本回合可见的工具在开始时确定，整个回合不变。
-  const visibleNames = deps.registry.visibleTools(ctx.tool_switches);
+  // 生效中的 skill 通过 allowed-tools 带进来的工具也算在内；回合中间才读到的 skill，
+  // 它的工具要到下一个回合才出现，这样一回合内的工具集不会变。
+  const skillTools = (ctx.active_skills ?? []).flatMap((s) => s.allowed_tools ?? []);
+  const visibleNames = deps.registry.visibleTools(ctx.tool_switches, skillTools);
   const visible = new Set(visibleNames);
   const tools = deps.registry.schemas(visibleNames);
 

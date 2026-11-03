@@ -67,12 +67,23 @@ export class ToolRegistry {
   /**
    * 本回合对模型可见的工具名（有序）。
    * @param {Record<string, boolean>} switches  设置页的开关，缺省视为开启
+   * @param {string[]} [extra]  生效中的 skill 用 allowed-tools 带进来的工具名
    * @returns {string[]}
    */
-  visibleTools(switches) {
-    return [...this.tools.values()]
+  visibleTools(switches, extra = []) {
+    const names = [...this.tools.values()]
       .filter((t) => t.exposure === 'default' && switches[t.name] !== false)
       .map((t) => t.name);
+    const seen = new Set(names);
+    for (const name of extra) {
+      const tool = this.tools.get(name);
+      // 只开放 on-demand 的工具：default 的开关归用户管，skill 不该替用户打开。
+      // 名字写错的（比如 skill 里写了没注册的工具）直接忽略，不能让整回合失败。
+      if (!tool || tool.exposure !== 'on-demand' || seen.has(name)) continue;
+      names.push(name);
+      seen.add(name);
+    }
+    return names;
   }
 
   /**

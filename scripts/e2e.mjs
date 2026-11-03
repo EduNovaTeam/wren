@@ -115,6 +115,22 @@ async function main() {
   );
   check(continuedSystem.includes('# 写周报'), '后续回合丢了 skill 正文');
 
+  // skill 自带的工具：web-research 声明了 allowed-tools: fetch_url
+  const beforeTools = llm.requests.at(-1).tools?.map((t) => t.function.name) ?? [];
+  check(!beforeTools.includes('fetch_url'), `fetch_url 不该默认可见：${beforeTools}`);
+
+  llm.push({ text: '我来查一下。' });
+  const research = await call('POST', `${base}/api/sessions/${session.id}/turns`, {
+    content: '/web-research 查一下 wren 的 skill 规范',
+  });
+  const researchEvents = await readSse(`${base}/api/turns/${research.turn_id}/events`);
+  check(
+    researchEvents.at(-1)?.status === 'done',
+    `带工具的 skill 回合应以 done 结束：${JSON.stringify(researchEvents.at(-1))}`,
+  );
+  const withTools = llm.requests.at(-1).tools?.map((t) => t.function.name) ?? [];
+  check(withTools.includes('fetch_url'), `skill 的 allowed-tools 没有开放：${withTools}`);
+
   await llm.close();
   console.log(`e2e ok：${types.length} 个事件，${turns[0].messages.length} 条消息`);
 }

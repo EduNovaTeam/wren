@@ -31,6 +31,11 @@ const registry = new ToolRegistry()
     name: 'wait', description: '', parameters: { type: 'object', properties: {} },
     execute: (_args, { signal }) => new Promise((_, reject) => signal.addEventListener('abort',
       () => reject(signal.reason))),
+  })
+  .register({
+    name: 'secret', description: '只有 skill 要才给', parameters: { type: 'object', properties: {} },
+    exposure: 'on-demand',
+    execute: () => '密文',
   });
 
 before(async () => {
@@ -112,6 +117,25 @@ test('tool list is fixed per turn and honors switches', async () => {
   const events = await runTurn(newTurn({ tool_switches: { wait: false } }));
   assert.deepEqual(events.find((e) => e.type === 'turn_info').tools, ['add']);
   assert.deepEqual(llm.requests.at(-1).tools.map((t) => t.function.name), ['add']);
+});
+
+test('a skill brings its allowed tools into the turn', async () => {
+  llm.push({ text: 'ok' });
+  const events = await runTurn(newTurn({
+    active_skills: [{
+      name: 'research', description: '', body: '', files: [], reason: 'invoked',
+      allowed_tools: ['secret', 'not_registered'],
+    }],
+  }));
+  assert.deepEqual(events.find((e) => e.type === 'turn_info').tools, ['add', 'wait', 'secret']);
+  assert.deepEqual(llm.requests.at(-1).tools.map((t) => t.function.name),
+    ['add', 'wait', 'secret']);
+});
+
+test('tools from a skill are gone once it is not active', async () => {
+  llm.push({ text: 'ok' });
+  await runTurn(newTurn());
+  assert.deepEqual(llm.requests.at(-1).tools.map((t) => t.function.name), ['add', 'wait']);
 });
 
 test('history from backend is sent with reasoning_content normalized', async () => {
