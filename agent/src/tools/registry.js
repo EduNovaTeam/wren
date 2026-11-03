@@ -2,7 +2,8 @@
  * 工具注册表。
  *
  * 每个工具是一个普通对象（见 ToolDefinition），在 `src/tools/index.js` 里注册。
- * 回合开始时由 `visibleTools()` 算出本回合对模型可见的工具，整个回合内不变。
+ * 模型可见的工具由 `toolsFor()` 在每次模型请求前计算：设置页开启的普通工具，加上
+ * 已激活 Skill 声明的按需工具。框架自身的工具（core）始终可见。
  */
 
 /**
@@ -19,10 +20,14 @@
  * @property {string} name  只能用字母、数字、下划线、短横线
  * @property {string} description  给模型看的说明：做什么、什么时候用
  * @property {object} parameters  JSON Schema（type: object）
- * @property {'default'|'on-demand'} [exposure]
+ * @property {'default'|'on-demand'|'core'} [exposure]
  *   default：按设置页的开关决定是否可见（默认）。
- *   on-demand：默认不可见，也不出现在设置页，由上层按需开放。
+ *   on-demand：默认不可见；只有已激活 Skill 的 allowed-tools 声明它、且用户没有
+ *     明确关闭时才开放。设置页会列出它，供用户明确禁用。
+ *   core：框架自身使用的工具（例如 activate_skill），始终可见，不出现在设置页。
  * @property {number} [timeoutMs]  默认 30 秒
+ * @property {number} [maxResultChars]  返回给模型的最大字符数，默认 20000；
+ *   Skill 正文工具需要放宽到正文预算允许的长度，避免截断关键指引。
  * @property {(args: any, ctx: ToolContext) => Promise<unknown>|unknown} execute
  *   返回字符串或可 JSON 序列化的值；抛出的异常会作为错误结果交给模型。
  */
@@ -40,10 +45,14 @@ export class ToolRegistry {
     if (!NAME_RE.test(def.name)) throw new Error(`工具名不合规：${def.name}`);
     if (this.tools.has(def.name)) throw new Error(`工具重复注册：${def.name}`);
     if (def.parameters?.type !== 'object') throw new Error(`${def.name}: parameters 必须是 object schema`);
+    if (def.exposure && !['default', 'on-demand', 'core'].includes(def.exposure)) {
+      throw new Error(`${def.name}: exposure 只能是 default / on-demand / core`);
+    }
     if (typeof def.execute !== 'function') throw new Error(`${def.name}: 缺少 execute`);
     this.tools.set(def.name, {
       exposure: 'default',
       timeoutMs: 30_000,
+      maxResultChars: RESULT_MAX_CHARS,
       ...def,
     });
     return this;
@@ -54,13 +63,18 @@ export class ToolRegistry {
     return this.tools.get(name);
   }
 
-  /** 给后端设置页用的工具清单。 */
+  /** 全部工具名（Skill 校验 allowed-tools 用）。 */
+  toolNames() {
+    return [...this.tools.keys()];
+  }
+
+  /** 给后端设置页用的工具清单。按需工具也列出来，用户可以明确禁用。 */
   list() {
     return [...this.tools.values()].map((t) => ({
       name: t.name,
       description: t.description,
       exposure: t.exposure,
-      toggleable: t.exposure === 'default',
+      toggleable: t.exposure !== 'core',
     }));
   }
 
@@ -72,6 +86,24 @@ export class ToolRegistry {
   visibleTools(switches) {
     return [...this.tools.values()]
       .filter((t) => t.exposure === 'default' && switches[t.name] !== false)
+      .map((t) => t.name);
+  }
+
+  /**
+   * 一次模型请求可以使用的工具名（有序）：框架工具 + 开关打开的普通工具 +
+   * 已激活 Skill 声明、且用户没有明确关闭的按需工具。
+   * @param {Record<string, boolean>} switches
+   * @param {Iterable<string>} [extra]  Skill 的 allowed-tools
+   * @returns {string[]}
+   */
+  toolsFor(switches, extra = []) {
+    const extraNames = new Set(extra);
+    return [...this.tools.values()]
+      .filter((t) => {
+        if (t.exposure === 'core') return true;
+        if (switches[t.name] === false) return false;
+        return t.exposure === 'default' || extraNames.has(t.name);
+      })
       .map((t) => t.name);
   }
 
@@ -124,7 +156,7 @@ export async function runTool(registry, visible, call, ctx) {
   try {
     const value = await raceAbort(Promise.resolve(tool.execute(args, { ...ctx, signal })), signal);
     const text = typeof value === 'string' ? value : JSON.stringify(value ?? null);
-    return { ok: true, content: truncate(text) };
+    return { ok: true, content: truncate(text, tool.maxResultChars) };
   } catch (err) {
     if (ctx.signal.aborted) throw err;
     if (timeout.signal.aborted) return { ok: false, content: `错误：工具执行超时（${tool.timeoutMs}ms）。` };

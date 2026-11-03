@@ -20,6 +20,9 @@ const fakeBackend = /** @type {any} */ ({
     if (!ctx) throw new Error('404');
     return ctx;
   },
+  async request() {
+    return { skill_switches: {}, active_skills: [] };
+  },
 });
 
 const registry = new ToolRegistry()
@@ -107,7 +110,7 @@ test('tool call round-trip passes reasoning_content back', async () => {
   assert.equal('name' in second.messages.at(-1), false);
 });
 
-test('tool list is fixed per turn and honors switches', async () => {
+test('tool list is computed before each request and honors switches', async () => {
   llm.push({ text: 'ok' });
   const events = await runTurn(newTurn({ tool_switches: { wait: false } }));
   assert.deepEqual(events.find((e) => e.type === 'turn_info').tools, ['add']);

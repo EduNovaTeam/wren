@@ -24,7 +24,16 @@ function registry() {
 test('visibleTools respects switches and on-demand exposure', () => {
   const r = registry();
   assert.deepEqual(r.visibleTools({ boom: false }), ['ok', 'slow']);
-  assert.deepEqual(r.list().find((t) => t.name === 'hidden')?.toggleable, false);
+  // 按需工具也列在设置页：用户可以明确关闭它。
+  assert.equal(r.list().find((t) => t.name === 'hidden')?.toggleable, true);
+});
+
+test('toolsFor opens on-demand tools only when requested, never when disabled', () => {
+  const r = registry().register({ name: 'core', description: '', parameters: schema,
+    exposure: 'core', execute: () => 'c' });
+  assert.deepEqual(r.toolsFor({ boom: false }, ['hidden']), ['ok', 'slow', 'hidden', 'core']);
+  assert.deepEqual(r.toolsFor({ hidden: false }, ['hidden']), ['ok', 'boom', 'slow', 'core']);
+  assert.deepEqual(r.toolsFor({}), ['ok', 'boom', 'slow', 'core']);
 });
 
 test('register rejects duplicates and bad names', () => {
@@ -42,6 +51,16 @@ test('runTool turns failures into results for the model', async () => {
   assert.match((await runTool(r, visible, call('slow'), ctx())).content, /超时/);
   assert.match((await runTool(r, visible, call('ok', '{bad'), ctx())).content, /JSON/);
   assert.match((await runTool(r, visible, call('ok', '[1]'), ctx())).content, /对象/);
+});
+
+test('runTool honors a per-tool result limit with an explicit note', async () => {
+  const r = new ToolRegistry().register({
+    name: 'big', description: '', parameters: schema, maxResultChars: 10,
+    execute: () => 'x'.repeat(30),
+  });
+  const out = await runTool(r, new Set(['big']), call('big'), ctx());
+  assert.equal(out.ok, true);
+  assert.match(out.content, /^x{10}\n…（已截断，原长 30 字符）$/);
 });
 
 test('runTool refuses tools that are not visible this turn', async () => {

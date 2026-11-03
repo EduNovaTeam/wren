@@ -34,7 +34,9 @@ const FETCH_MAX_BYTES = 2_000_000;
  */
 export const fetchUrl = {
   name: 'fetch_url',
-  description: '抓取一个公开网页，返回去掉标签后的正文文本（最多约 2 万字）。',
+  description:
+    '抓取一个公开网页，返回去掉标签后的正文文本（最多约 2 万字）。' +
+    '按需工具：只有已激活的 Skill 声明需要它时才可用。',
   parameters: {
     type: 'object',
     properties: {
