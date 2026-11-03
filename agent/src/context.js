@@ -34,7 +34,25 @@ export const userInstructionsSection = {
   render: (ctx) => (ctx.system_prompt.trim() ? `用户的附加要求：\n${ctx.system_prompt.trim()}` : null),
 };
 
-export const DEFAULT_SECTIONS = [identitySection, environmentSection, userInstructionsSection];
+/** 可用 Skill 的精简目录：只有名称和简介，不注入正文或附件。 @type {PromptSection} */
+export const skillCatalogSection = {
+  id: 'skill-catalog',
+  render: (ctx) => ctx.skill_prompt?.index ?? null,
+};
+
+/** 当前会话已激活 Skill 的正文。每次模型请求重新注入，历史被截断也不受影响。 @type {PromptSection} */
+export const activeSkillsSection = {
+  id: 'active-skills',
+  render: (ctx) => ctx.skill_prompt?.bodies ?? null,
+};
+
+export const DEFAULT_SECTIONS = [
+  identitySection,
+  environmentSection,
+  userInstructionsSection,
+  skillCatalogSection,
+  activeSkillsSection,
+];
 
 /**
  * @param {PromptSection[]} sections

@@ -1,6 +1,7 @@
 import { currentTime, fetchUrl } from './builtin.js';
 import { saveNote, searchNotes } from './notes.js';
 import { ToolRegistry } from './registry.js';
+import { activateSkill, readSkillResource } from './skills.js';
 
 /** 创建并注册全部工具。新增工具：写一个 ToolDefinition，在这里 register。 */
 export function createToolRegistry() {
@@ -8,5 +9,7 @@ export function createToolRegistry() {
     .register(currentTime)
     .register(saveNote)
     .register(searchNotes)
-    .register(fetchUrl);
+    .register(fetchUrl)
+    .register(activateSkill)
+    .register(readSkillResource);
 }

@@ -6,7 +6,7 @@
 - **agent/**：Node.js。回合循环、工具、模型调用。无第三方依赖。
 - **web/**：Vue 3 + Vite。对话界面与设置页。
 
-架构说明见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)，参与开发见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+架构说明见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)，Skill 的格式与用法见 [docs/SKILLS.md](docs/SKILLS.md)，参与开发见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ## 快速开始
 
@@ -34,6 +34,7 @@ node scripts/dev.mjs
 - 模型配置保存在 `data/wren.db`（已在 .gitignore 中），不要提交这个文件。
 - 端口等运行参数可在根目录 `.env` 里改，参考 `.env.example`。
 - `npm run build` 之后，后端也会直接托管前端页面（<http://127.0.0.1:5280>），这时可以用 `node scripts/dev.mjs --no-web`。
+- Skill 放在 `skills/<名称>/SKILL.md`；想放自己的 Skill，用 `WREN_SKILLS_DIR` 指定用户目录（默认 `data/skills`），同名时用户版本覆盖内置版本。
 
 ## 功能
 
@@ -42,6 +43,7 @@ node scripts/dev.mjs
 | 对话 | 流式输出，思考过程可折叠；刷新页面会接上进行中的回合 |
 | 停止 | 随时停止，已经输出的内容保留 |
 | 工具 | `current_time`、`save_note`、`search_notes`；设置页可逐个开关 |
+| Skill | 从 `skills/` 和用户目录发现「做事方法」；模型按需启用、`/名称` 显式启用，激活后本会话持续生效；附属资料按需读取；声明需要的工具（如 `fetch_url`）只在 Skill 生效时开放 |
 | 笔记 | 让 agent「记下来」，在笔记页查看和删除 |
 | 历史预算 | 只把预算内最近的完整回合发给模型，超出部分整回合丢弃 |
 

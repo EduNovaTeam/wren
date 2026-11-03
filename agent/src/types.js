@@ -26,8 +26,19 @@
  * @property {ModelSettings} model
  * @property {string} system_prompt  用户在设置页填写的自定义提示，可能为空
  * @property {Record<string, boolean>} tool_switches
+ * @property {Record<string, boolean>} [skill_switches]  设置页的 Skill 启停，缺省视为开启
+ * @property {ActiveSkill[]} [active_skills]  本会话已激活的 Skill
  * @property {HistoryTurn[]} history  按时间顺序，已结束的回合
  * @property {ChatMessage} user_message
+ * @property {{ index: string|null, bodies: string|null }} [skill_prompt]
+ *   由回合循环在每次请求前填入，只用于系统提示拼接
+ */
+
+/**
+ * @typedef {object} ActiveSkill
+ * @property {string} name
+ * @property {'builtin'|'user'} [source]
+ * @property {string} [activated_at]
  */
 
 /**

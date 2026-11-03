@@ -24,7 +24,16 @@ function registry() {
 test('visibleTools respects switches and on-demand exposure', () => {
   const r = registry();
   assert.deepEqual(r.visibleTools({ boom: false }), ['ok', 'slow']);
-  assert.deepEqual(r.list().find((t) => t.name === 'hidden')?.toggleable, false);
+  // 按需工具也列在设置页：用户可以明确关闭它。
+  assert.equal(r.list().find((t) => t.name === 'hidden')?.toggleable, true);
+});
+
+test('toolsFor opens on-demand tools only when requested, never when disabled', () => {
+  const r = registry().register({ name: 'core', description: '', parameters: schema,
+    exposure: 'core', execute: () => 'c' });
+  assert.deepEqual(r.toolsFor({ boom: false }, ['hidden']), ['ok', 'slow', 'hidden', 'core']);
+  assert.deepEqual(r.toolsFor({ hidden: false }, ['hidden']), ['ok', 'boom', 'slow', 'core']);
+  assert.deepEqual(r.toolsFor({}), ['ok', 'boom', 'slow', 'core']);
 });
 
 test('register rejects duplicates and bad names', () => {
@@ -44,6 +53,16 @@ test('runTool turns failures into results for the model', async () => {
   assert.match((await runTool(r, visible, call('ok', '[1]'), ctx())).content, /对象/);
 });
 
+test('runTool honors a per-tool result limit with an explicit note', async () => {
+  const r = new ToolRegistry().register({
+    name: 'big', description: '', parameters: schema, maxResultChars: 10,
+    execute: () => 'x'.repeat(30),
+  });
+  const out = await runTool(r, new Set(['big']), call('big'), ctx());
+  assert.equal(out.ok, true);
+  assert.match(out.content, /^x{10}\n…（已截断，原长 30 字符）$/);
+});
+
 test('runTool refuses tools that are not visible this turn', async () => {
   const r = registry();
   const out = await runTool(r, new Set(['ok']), call('hidden'), ctx());
@@ -53,8 +72,16 @@ test('runTool refuses tools that are not visible this turn', async () => {
 
 test('isPrivateAddress', () => {
   for (const ip of ['127.0.0.1', '10.1.2.3', '192.168.1.1', '172.20.0.1', '169.254.1.1', '::1',
-    '::ffff:127.0.0.1', 'fd00::1']) {
+    '::ffff:127.0.0.1', '::ffff:7f00:1', '0:0:0:0:0:ffff:7f00:1', '::ffff:a00:1',
+    '::ffff:c0a8:101', 'fd00::1', '2001:db8::1']) {
     assert.equal(isPrivateAddress(ip), true, ip);
   }
-  for (const ip of ['8.8.8.8', '1.1.1.1', '2606:4700::1111']) assert.equal(isPrivateAddress(ip), false, ip);
+  for (const ip of ['8.8.8.8', '1.1.1.1', '2606:4700::1111', '::ffff:8.8.8.8']) {
+    assert.equal(isPrivateAddress(ip), false, ip);
+  }
+  // URL 会把 IPv4 映射地址规范化成十六进制形式，检查的是规范化后的 hostname。
+  for (const url of ['http://[::ffff:127.0.0.1]/', 'http://[::ffff:7f00:1]/']) {
+    const host = new URL(url).hostname.replace(/^\[|\]$/g, '');
+    assert.equal(isPrivateAddress(host), true, url);
+  }
 });

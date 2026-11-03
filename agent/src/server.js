@@ -3,6 +3,7 @@
  *
  *   GET  /health
  *   GET  /tools                    工具清单（设置页用）
+ *   GET  /skills                   Skill 清单与校验结果（设置页用，不含正文）
  *   POST /turns                    {session_id, turn_id} → NDJSON 事件流，直到 turn_end
  *   POST /turns/:id/abort          停止进行中的回合
  */
@@ -14,6 +15,7 @@ import { pathToFileURL } from 'node:url';
 import { BackendClient } from './backend.js';
 import { loadConfig } from './config.js';
 import { DEFAULT_SECTIONS } from './context.js';
+import { loadCatalog } from './skills/catalog.js';
 import { createToolRegistry } from './tools/index.js';
 import { runTurn } from './turn.js';
 
@@ -26,11 +28,19 @@ const BODY_MAX = 64 * 1024;
  */
 export function createAgentServer({ config, deps = {} }) {
   const backend = deps.backend ?? new BackendClient(config.backendUrl, config.internalToken);
+  const skillOptions = deps.skillOptions ?? {
+    builtinDir: config.builtinSkillsDir,
+    userDir: config.userSkillsDir,
+    bodyBudgetTokens: config.skillBodyBudgetTokens,
+    indexBudgetTokens: config.skillIndexBudgetTokens,
+    totalBodyBudgetTokens: config.skillActiveBudgetTokens,
+  };
   /** @type {import('./turn.js').TurnDeps} */
   const turnDeps = {
     registry: deps.registry ?? createToolRegistry(),
     sections: deps.sections ?? DEFAULT_SECTIONS,
     backend,
+    skillOptions,
     complete: deps.complete,
   };
   /** @type {Map<number, AbortController>} */
@@ -46,6 +56,13 @@ export function createAgentServer({ config, deps = {} }) {
 
       if (req.method === 'GET' && url.pathname === '/tools') {
         return json(res, 200, { tools: turnDeps.registry.list() });
+      }
+      if (req.method === 'GET' && url.pathname === '/skills') {
+        const catalog = await loadCatalog({
+          ...turnDeps.skillOptions,
+          toolNames: turnDeps.registry.toolNames(),
+        });
+        return json(res, 200, { skills: catalog.list(), errors: catalog.errors });
       }
       if (req.method === 'POST' && url.pathname === '/turns') {
         const body = await readJson(req);
