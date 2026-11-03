@@ -674,9 +674,7 @@ def test_left_skill_disappears_from_the_agent_side_too(client, builtin_root):
     assert [s["name"] for s in listed] == ["other"]
     detail = client.get(f"/internal/skills/weekly-report?session={sid}", headers=H)
     assert detail.status_code == 404
-    attachment = client.get(
-        f"/internal/skills/weekly-report/files/x.md?session={sid}", headers=H
-    )
+    attachment = client.get(f"/internal/skills/weekly-report/files/x.md?session={sid}", headers=H)
     assert attachment.status_code == 404
 
     # 别的会话不受影响

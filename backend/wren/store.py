@@ -79,8 +79,7 @@ def activate_skill(
     now = utcnow()
     if explicit:
         conn.execute(
-            "UPDATE session_skills SET pinned_at = NULL"
-            " WHERE session_id = ? AND skill_name <> ?",
+            "UPDATE session_skills SET pinned_at = NULL WHERE session_id = ? AND skill_name <> ?",
             (session_id, name),
         )
         conn.execute(
