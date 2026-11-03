@@ -83,19 +83,92 @@ async function assertPublicUrl(url) {
 
 /** @param {string} ip */
 export function isPrivateAddress(ip) {
-  if (ip.includes(':')) {
-    const v = ip.toLowerCase();
-    if (v.startsWith('::ffff:')) return isPrivateAddress(v.slice(7));
-    return v === '::1' || v === '::' || v.startsWith('fc') || v.startsWith('fd') || v.startsWith('fe80');
+  let text = String(ip ?? '').trim().toLowerCase();
+  if (text.startsWith('[') && text.endsWith(']')) text = text.slice(1, -1);
+  const family = isIP(text);
+  if (family === 4) return isPrivateIPv4(text);
+  if (family === 6) return isPrivateIPv6(text);
+  // 无法判断的地址一律按私有处理，避免新写法绕过检查。
+  return true;
+}
+
+/** @param {string} ip */
+function isPrivateIPv4(ip) {
+  const parts = ip.split('.').map(Number);
+  if (parts.length !== 4 || parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) {
+    return true;
   }
-  const [a, b] = ip.split('.').map(Number);
+  const [a, b, c] = parts;
   return (
-    a === 10 || a === 127 || a === 0 ||
+    a === 0 || a === 10 || a === 127 ||
+    (a === 100 && b >= 64 && b <= 127) ||
     (a === 169 && b === 254) ||
     (a === 172 && b >= 16 && b <= 31) ||
     (a === 192 && b === 168) ||
-    (a === 100 && b >= 64 && b <= 127)
+    (a === 192 && b === 0 && (c === 0 || c === 2)) ||
+    (a === 198 && (b === 18 || b === 19 || (b === 51 && c === 100))) ||
+    (a === 203 && b === 0 && c === 113) ||
+    a >= 224
   );
+}
+
+/** @param {string} ip */
+function isPrivateIPv6(ip) {
+  const groups = ipv6Groups(ip);
+  if (!groups) return true;
+
+  const embedded = (hi, lo) => `${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`;
+  // IPv4 映射地址（::ffff:0:0/96）：`http://[::ffff:127.0.0.1]/` 会被 URL 规范化成
+  // `::ffff:7f00:1`，必须还原成 IPv4 再判断。
+  if (groups.slice(0, 5).every((g) => g === 0) && groups[5] === 0xffff) {
+    return isPrivateIPv4(embedded(groups[6], groups[7]));
+  }
+  // IPv4 兼容地址（已废弃，但解析器仍可能遇到）。
+  if (groups.slice(0, 6).every((g) => g === 0)) {
+    return isPrivateIPv4(embedded(groups[6], groups[7]));
+  }
+  if ((groups[0] & 0xfe00) === 0xfc00) return true; // fc00::/7 唯一本地地址
+  if ((groups[0] & 0xffc0) === 0xfe80) return true; // fe80::/10 链路本地
+  if ((groups[0] & 0xff00) === 0xff00) return true; // ff00::/8 组播
+  if (groups[0] === 0x2001 && groups[1] === 0x0db8) return true; // 文档地址
+  if (groups[0] === 0x2002) return true; // 6to4 可能内嵌内网 IPv4
+  if (groups[0] === 0x0064 && groups[1] === 0xff9b && groups.slice(2, 6).every((g) => g === 0)) {
+    return true; // NAT64 可能把请求转给内网 IPv4
+  }
+  return false;
+}
+
+/**
+ * 把 IPv6 字符串拆成 8 个 16 位整数；非法时返回 null。
+ * @param {string} ip
+ * @returns {number[] | null}
+ */
+function ipv6Groups(ip) {
+  let text = ip;
+  const zone = text.indexOf('%');
+  if (zone !== -1) text = text.slice(0, zone);
+  if (text.includes('.')) {
+    const idx = text.lastIndexOf(':');
+    if (idx === -1) return null;
+    const v4 = text.slice(idx + 1).split('.').map(Number);
+    if (v4.length !== 4 || v4.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return null;
+    const hi = ((v4[0] << 8) | v4[1]).toString(16);
+    const lo = ((v4[2] << 8) | v4[3]).toString(16);
+    text = `${text.slice(0, idx + 1)}${hi}:${lo}`;
+  }
+  const halves = text.split('::');
+  if (halves.length > 2) return null;
+  const head = halves[0] ? halves[0].split(':') : [];
+  const tail = halves.length === 2 && halves[1] ? halves[1].split(':') : [];
+  const total = head.length + tail.length;
+  if (halves.length === 2 ? total > 7 : total !== 8) return null;
+  const parts = [...head, ...Array(8 - total).fill('0'), ...tail];
+  const groups = [];
+  for (const part of parts) {
+    if (!/^[0-9a-f]{1,4}$/.test(part)) return null;
+    groups.push(Number.parseInt(part, 16));
+  }
+  return groups;
 }
 
 /**
