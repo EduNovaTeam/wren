@@ -77,12 +77,22 @@ export const activeSkillsSection = {
                 `本会话已启用 skill「${skill.name}」，它对之后每条消息都生效，即使消息里没有 /${skill.name}`
                   + ' 命令也照样按它处理。下面是当前生效的做法：',
                 skill.body,
-                '用户明确说停用、或明确要你去做别的事时才不套用它。',
               ]
             : [
                 `用户指定本回合使用 skill「${skill.name}」（${skill.description}），照它说的做：`,
                 skill.body,
               ];
+        // 工具清单是接口参数，模型未必会去翻；实测它会顺着上一句「下一回合才能用」继续说没有。
+        // 所以这里把已开放的工具写成文字，明确到「现在就能调」。
+        if (skill.allowed_tools?.length) {
+          parts.push(
+            `这个 skill 需要的工具本回合已经开放：${skill.allowed_tools.join('、')}。`
+              + '需要时直接调用，不要说它不存在或再等一个回合。',
+          );
+        }
+        if (skill.reason === 'session') {
+          parts.push('用户明确说停用、或明确要你去做别的事时才不套用它。');
+        }
         if (skill.files?.length) {
           parts.push(
             `附带文件：${skill.files.join('、')}。需要时用 use_skill({ name: '${skill.name}', file }) 读取。`,

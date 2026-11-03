@@ -67,18 +67,13 @@ test('use_skill returns the body and marks the skill active for the session', as
   ]);
 });
 
-test('reading a skill that brings tools says they start next turn', async () => {
+test('reading a skill does not promise tools for a later turn', async () => {
   const backend = fakeBackend({
     skill: { ...SKILL, allowed_tools: ['fetch_url', 'run_sql'] },
   });
   const text = await useSkill.execute({ name: 'weekly-report' }, ctx(backend));
-  assert.match(text, /这个 skill 声明的工具：fetch_url、run_sql/);
-  assert.match(text, /从下一回合起才能调用/);
-});
-
-test('a skill without tools says nothing about them', async () => {
-  const backend = fakeBackend({ skill: { ...SKILL, allowed_tools: [] } });
-  const text = await useSkill.execute({ name: 'weekly-report' }, ctx(backend));
+  // 工具结果会留在历史里，写到「下一回合才能用」会让模型之后每轮都等着
+  assert.doesNotMatch(text, /下一回合/);
   assert.doesNotMatch(text, /声明的工具/);
 });
 
@@ -200,7 +195,7 @@ test('a skill kept from earlier turns is labelled as session-scoped', () => {
         description: '按团队模板撰写个人周报。',
         body: '# 写周报\n\n先读模板',
         files: [],
-        allowed_tools: [],
+        allowed_tools: ['fetch_url'],
         reason: 'session',
       },
     ],
@@ -209,6 +204,8 @@ test('a skill kept from earlier turns is labelled as session-scoped', () => {
   // 必须说清之后每条消息都算数，否则模型会按 skill 正文里的适用条件把它当成「只在命令后生效」
   assert.match(prompt, /它对之后每条消息都生效/);
   assert.match(prompt, /即使消息里没有 \/weekly-report 命令也照样按它处理/);
+  // 工具已经开放这件事要写成文字，模型不会主动去翻接口参数
+  assert.match(prompt, /本回合已经开放：fetch_url/);
   // 描述是「什么时候该挑这个 skill」的触发条件，出现在生效段里会被模型拿来论证不适用
   assert.doesNotMatch(prompt, /按团队模板撰写个人周报。/);
   assert.doesNotMatch(prompt, /用户指定本回合使用/);

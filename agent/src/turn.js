@@ -51,10 +51,23 @@ export async function runTurn(ctx, deps, emit, signal) {
   const visible = new Set(visibleNames);
   const tools = deps.registry.schemas(visibleNames);
 
+  // 提示里只说真正开放了的工具：skill 里写了没注册的名字（如 run_sql）不能声称为可用。
+  const plainNames = new Set(deps.registry.visibleTools(ctx.tool_switches));
+  const granted = new Set(visibleNames.filter((name) => !plainNames.has(name)));
+  const promptCtx = ctx.active_skills?.some((s) => s.allowed_tools?.length)
+    ? {
+        ...ctx,
+        active_skills: ctx.active_skills.map((s) => ({
+          ...s,
+          allowed_tools: (s.allowed_tools ?? []).filter((name) => granted.has(name)),
+        })),
+      }
+    : ctx;
+
   const history = selectHistory(ctx.history, model.history_budget_tokens);
   /** @type {import('./types.js').ChatMessage[]} */
   const messages = [
-    { role: 'system', content: buildSystemPrompt(deps.sections, ctx) },
+    { role: 'system', content: buildSystemPrompt(deps.sections, promptCtx) },
     ...history.messages,
     ctx.user_message,
   ];

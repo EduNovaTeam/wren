@@ -43,11 +43,9 @@ export const useSkill = {
     if (skill.files?.length) {
       lines.push('', `附带文件（需要时带 file 参数再读）：${skill.files.join('、')}`);
     }
-    if (skill.allowed_tools?.length) {
-      // 本回合的工具清单在回合开始时已经定下，这一回合调不到，得说清楚，否则模型会试一次失败
-      lines.push('', `这个 skill 声明的工具：${skill.allowed_tools.join('、')}。`
-        + '本回合的工具清单在开局时已经定下，它们从下一回合起才能调用。');
-    }
+    // 这里不要写「它的工具下一回合起才能用」：工具结果会永久留在历史里，
+    // 模型下一回合读到这句会继续等，明明工具已经开放了也坚持说没有。
+    // 工具是否可用由每回合重新生成的系统提示说明。
     return lines.join('\n');
   },
 };

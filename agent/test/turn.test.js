@@ -130,6 +130,10 @@ test('a skill brings its allowed tools into the turn', async () => {
   assert.deepEqual(events.find((e) => e.type === 'turn_info').tools, ['add', 'wait', 'secret']);
   assert.deepEqual(llm.requests.at(-1).tools.map((t) => t.function.name),
     ['add', 'wait', 'secret']);
+  // 工具清单是接口参数，模型未必会翻；提示里要明说已经开放，且不能说没注册的那个
+  const system = llm.requests.at(-1).messages[0].content;
+  assert.match(system, /本回合已经开放：secret/);
+  assert.doesNotMatch(system, /not_registered/);
 });
 
 test('tools from a skill are gone once it is not active', async () => {
