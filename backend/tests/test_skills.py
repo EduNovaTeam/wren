@@ -136,6 +136,20 @@ def _make_dir_link(link: Path, target: Path) -> bool:
     return result.returncode == 0
 
 
+def _remove_link(path: Path) -> None:
+    """只删链接本身，不碰它指向的东西。
+
+    POSIX 的符号链接 `unlink` 就行，Windows 的目录联接得用 `rmdir`（`unlink` 会
+    因为「是个目录」被拒）。两种都要处理，否则 Linux 上的 CI 会在清理时炸掉。
+    """
+    if not (path.exists() or path.is_symlink()):
+        return
+    try:
+        path.unlink()
+    except (IsADirectoryError, PermissionError):
+        os.rmdir(path)
+
+
 def test_links_inside_a_skill_are_not_followed(builtin_root):
     """skill 是外部内容：顺着链接就能读根目录外的文件、或者原地转圈，都不允许。"""
     directory = write_skill(builtin_root, "linked", "name: linked\ndescription: 带链接")
@@ -156,8 +170,7 @@ def test_links_inside_a_skill_are_not_followed(builtin_root):
     finally:
         # 留着自指链接会让 pytest 清理临时目录时跟着它递归进去，慢到以分钟计
         for link in (directory / "self", directory / "secret"):
-            if link.exists() or link.is_symlink():
-                os.rmdir(link)
+            _remove_link(link)
 
 
 def test_a_skill_directory_that_is_a_link_is_reported_instead_of_loaded(builtin_root):
@@ -178,7 +191,7 @@ def test_a_skill_directory_that_is_a_link_is_reported_instead_of_loaded(builtin_
         with pytest.raises(skills.SkillError):
             skills.read_file(skill, "notes.md")
     finally:
-        os.rmdir(builtin_root / "sneaky")
+        _remove_link(builtin_root / "sneaky")
 
 
 def test_read_file_returns_content_and_blocks_escape(builtin_root):
