@@ -31,6 +31,11 @@ const registry = new ToolRegistry()
     name: 'wait', description: '', parameters: { type: 'object', properties: {} },
     execute: (_args, { signal }) => new Promise((_, reject) => signal.addEventListener('abort',
       () => reject(signal.reason))),
+  })
+  .register({
+    name: 'secret', description: '只有 skill 要才给', parameters: { type: 'object', properties: {} },
+    exposure: 'on-demand',
+    execute: () => '密文',
   });
 
 before(async () => {
@@ -112,6 +117,82 @@ test('tool list is fixed per turn and honors switches', async () => {
   const events = await runTurn(newTurn({ tool_switches: { wait: false } }));
   assert.deepEqual(events.find((e) => e.type === 'turn_info').tools, ['add']);
   assert.deepEqual(llm.requests.at(-1).tools.map((t) => t.function.name), ['add']);
+});
+
+test('a skill the user left is announced as no longer in effect', async () => {
+  llm.push({ text: 'ok' });
+  const events = await runTurn(newTurn({ left_skills: ['research'] }));
+  // 它的工具不能被带进来
+  assert.deepEqual(events.find((e) => e.type === 'turn_info').tools, ['add', 'wait']);
+  // 历史里还有它成功调用过的记录，不说就会被照着做
+  const messages = llm.requests.at(-1).messages;
+  const reminder = messages.at(-2);
+  assert.equal(messages.at(-1).role, 'user');
+  assert.equal(reminder.role, 'system');
+  assert.match(reminder.content, /退出了 skill：research/);
+  assert.match(reminder.content, /调用会失败/);
+});
+
+test('a waiting skill still hands over its tools', async () => {
+  llm.push({ text: 'ok' });
+  const events = await runTurn(newTurn({
+    active_skills: [
+      {
+        name: 'lead', description: '', body: '# 主导', files: [], reason: 'session',
+        role: 'primary', allowed_tools: [],
+      },
+      {
+        name: 'waiting', description: '待命', body: '', files: [], reason: 'session',
+        role: 'secondary', allowed_tools: ['secret'],
+      },
+    ],
+  }));
+  // 待命的只是不给正文；工具还得开放，否则读了正文要等下一回合才有工具
+  assert.deepEqual(events.find((e) => e.type === 'turn_info').tools,
+    ['add', 'wait', 'secret']);
+});
+
+test('a skill brings its allowed tools into the turn', async () => {
+  llm.push({ text: 'ok' });
+  const events = await runTurn(newTurn({
+    active_skills: [{
+      name: 'research', description: '', body: '', files: [], reason: 'invoked',
+      allowed_tools: ['secret', 'not_registered'],
+    }],
+  }));
+  assert.deepEqual(events.find((e) => e.type === 'turn_info').tools, ['add', 'wait', 'secret']);
+  assert.deepEqual(llm.requests.at(-1).tools.map((t) => t.function.name),
+    ['add', 'wait', 'secret']);
+  // 工具清单是接口参数，模型未必会翻；提示里要明说已经开放，且不能说没注册的那个
+  const system = llm.requests.at(-1).messages[0].content;
+  assert.match(system, /本回合可调用的工具：add、wait、secret/);
+  assert.match(system, /本回合已经开放：secret/);
+  assert.doesNotMatch(system, /not_registered/);
+
+  // 同一会话里 skill 的工具必然经历「先前不可用、后来可用」。模型会死守自己更早那句
+  // 「没有这个工具」，所以要在历史之后、用户消息之前补一条本回合有效的提醒。
+  const messages = llm.requests.at(-1).messages;
+  const last = messages.at(-1);
+  const reminder = messages.at(-2);
+  assert.equal(last.role, 'user');
+  assert.equal(reminder.role, 'system');
+  assert.match(reminder.content, /工具提醒/);
+  assert.match(reminder.content, /可以直接调用 add、wait、secret/);
+  assert.match(reminder.content, /现在不成立了/);
+});
+
+test('no tool reminder when no skill brings tools', async () => {
+  llm.push({ text: 'ok' });
+  await runTurn(newTurn({}));
+  const messages = llm.requests.at(-1).messages;
+  assert.equal(messages.at(-1).role, 'user');
+  assert.ok(messages.every((m) => !String(m.content).includes('工具提醒')));
+});
+
+test('tools from a skill are gone once it is not active', async () => {
+  llm.push({ text: 'ok' });
+  await runTurn(newTurn());
+  assert.deepEqual(llm.requests.at(-1).tools.map((t) => t.function.name), ['add', 'wait']);
 });
 
 test('history from backend is sent with reasoning_content normalized', async () => {

@@ -19,6 +19,7 @@ export const routes = [
       { path: '', redirect: '/settings/model' },
       { path: 'model', name: 'settings-model', component: () => import('./views/settings/ModelSettings.vue') },
       { path: 'tools', name: 'settings-tools', component: () => import('./views/settings/ToolSettings.vue') },
+      { path: 'skills', name: 'settings-skills', component: () => import('./views/settings/SkillSettings.vue') },
       { path: 'prompt', name: 'settings-prompt', component: () => import('./views/settings/PromptSettings.vue') },
     ],
   },

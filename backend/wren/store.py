@@ -64,6 +64,126 @@ def delete_session(conn: sqlite3.Connection, session_id: int) -> bool:
     return conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,)).rowcount > 0
 
 
+# ---- session skills -------------------------------------------------------
+
+
+def activate_skill(
+    conn: sqlite3.Connection, session_id: int, name: str, *, explicit: bool = True
+) -> None:
+    """把 skill 记为会话级生效，并刷新它的「最近使用」时间。
+
+    `explicit` 区分来源：用户 `/名字` 点名（True）会清掉「已退出」的标记，并解除别的
+    skill 上的「主导」指定——用户开口要换，就按新说的来；模型自己读到正文（False）
+    只在该 skill 没被退出过时才生效，也不动主导。
+    """
+    now = utcnow()
+    if explicit:
+        conn.execute(
+            "UPDATE session_skills SET pinned_at = NULL WHERE session_id = ? AND skill_name <> ?",
+            (session_id, name),
+        )
+        conn.execute(
+            "INSERT INTO session_skills"
+            " (session_id, skill_name, activated_at, last_used_at, suppressed_at)"
+            " VALUES (?, ?, ?, ?, NULL)"
+            " ON CONFLICT(session_id, skill_name)"
+            " DO UPDATE SET suppressed_at = NULL, last_used_at = excluded.last_used_at",
+            (session_id, name, now, now),
+        )
+        return
+    # 模型读了一遍＝正在用这个 skill：刷新时间，没指定主导时它会浮到最前。
+    # 但被用户退出过的行不动，否则读一次就复活了。
+    refreshed = conn.execute(
+        "UPDATE session_skills SET last_used_at = ?"
+        " WHERE session_id = ? AND skill_name = ? AND suppressed_at IS NULL",
+        (now, session_id, name),
+    )
+    if refreshed.rowcount:
+        return
+    conn.execute(
+        "INSERT OR IGNORE INTO session_skills"
+        " (session_id, skill_name, activated_at, last_used_at)"
+        " VALUES (?, ?, ?, ?)",
+        (session_id, name, now, now),
+    )
+
+
+def mark_primary(conn: sqlite3.Connection, session_id: int, name: str) -> None:
+    """用户在界面上指定「主导」。这个选择要一直有效，直到用户再点名别的 skill。"""
+    now = utcnow()
+    conn.execute(
+        "UPDATE session_skills SET pinned_at = NULL WHERE session_id = ? AND skill_name <> ?",
+        (session_id, name),
+    )
+    conn.execute(
+        "INSERT INTO session_skills"
+        " (session_id, skill_name, activated_at, last_used_at, pinned_at, suppressed_at)"
+        " VALUES (?, ?, ?, ?, ?, NULL)"
+        " ON CONFLICT(session_id, skill_name)"
+        " DO UPDATE SET pinned_at = excluded.pinned_at,"
+        " last_used_at = excluded.last_used_at, suppressed_at = NULL",
+        (session_id, name, now, now, now),
+    )
+
+
+def deactivate_skill(conn: sqlite3.Connection, session_id: int, name: str) -> bool:
+    """用户退出一个 skill 的会话级生效。保留记录并打标记，见 `activate_skill`。"""
+    now = utcnow()
+    cur = conn.execute(
+        "INSERT INTO session_skills (session_id, skill_name, activated_at, suppressed_at)"
+        " VALUES (?, ?, ?, ?)"
+        " ON CONFLICT(session_id, skill_name) DO UPDATE SET suppressed_at = excluded.suppressed_at",
+        (session_id, name, now, now),
+    )
+    return cur.rowcount > 0
+
+
+def session_skills(conn: sqlite3.Connection, session_id: int) -> list[str]:
+    """返回会话里生效中的 skill 名。用户指定的主导排最前，其余按最近使用排。"""
+    rows = conn.execute(
+        "SELECT skill_name FROM session_skills WHERE session_id = ? AND suppressed_at IS NULL"
+        " ORDER BY (pinned_at IS NULL), COALESCE(last_used_at, activated_at) DESC, skill_name",
+        (session_id,),
+    ).fetchall()
+    return [row["skill_name"] for row in rows]
+
+
+def clear_pin(conn: sqlite3.Connection, session_id: int, name: str) -> None:
+    """取消「主导」指定：改回按最近使用自动决定，用户想反悔时用。"""
+    conn.execute(
+        "UPDATE session_skills SET pinned_at = NULL WHERE session_id = ? AND skill_name = ?",
+        (session_id, name),
+    )
+
+
+def pinned_skill(conn: sqlite3.Connection, session_id: int) -> str | None:
+    """用户明确指定为主导的 skill（没有则为 None）。
+
+    它和「最近使用」不是一回事：模型读一次别的 skill 会刷新那个的最近使用时间，
+    但不能因此把用户点的这个换掉。
+    """
+    row = conn.execute(
+        "SELECT skill_name FROM session_skills"
+        " WHERE session_id = ? AND pinned_at IS NOT NULL AND suppressed_at IS NULL"
+        " ORDER BY pinned_at DESC LIMIT 1",
+        (session_id,),
+    ).fetchone()
+    return row["skill_name"] if row else None
+
+
+def suppressed_skills(conn: sqlite3.Connection, session_id: int) -> list[str]:
+    """用户在这个会话里退出过的 skill。
+
+    这些 skill 连清单都不该出现：否则模型翻到它、读一遍正文，这个回合又照着做了，
+    用户点的退出等于没点。
+    """
+    rows = conn.execute(
+        "SELECT skill_name FROM session_skills WHERE session_id = ? AND suppressed_at IS NOT NULL",
+        (session_id,),
+    ).fetchall()
+    return [row["skill_name"] for row in rows]
+
+
 # ---- turns ----------------------------------------------------------------
 
 

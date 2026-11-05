@@ -12,6 +12,8 @@ const router = useRouter();
 
 /** @type {import('vue').Ref<any[]>} */
 const turns = ref([]);
+/** 本会话里正在生效的 skill：模型读过或用户 /点名过的，会一直生效到用户退出。 */
+const activeSkills = ref([]);
 const input = ref('');
 const error = ref('');
 const loading = ref(false);
@@ -37,9 +39,46 @@ onMounted(async () => {
     loading.value = false;
     scrollToBottom();
   }
+  loadActiveSkills();
 });
 
 onBeforeUnmount(() => subscription?.close());
+
+/** 回合结束时刷新：模型可能在这个回合里读了一个新 skill，或者用户刚 /点名过。 */
+async function loadActiveSkills() {
+  if (!props.sessionId) return;
+  try {
+    activeSkills.value = (await api.listSessionSkills(props.sessionId)).skills;
+  } catch {
+    // 列表拿不到不影响对话，安静失败
+  }
+}
+
+/** @param {string} name */
+async function leaveSkill(name) {
+  try {
+    const data = await api.leaveSessionSkill(props.sessionId, name);
+    activeSkills.value = data.skills;
+  } catch (err) {
+    error.value = err.message;
+  }
+}
+
+/**
+ * 点 chip 上的名字切换「指定」状态：
+ * 没指定过 → 指定它为主导；指定着的 → 取消，改回按最近使用自动决定。
+ * @param {{ name: string, pinned: boolean }} skill
+ */
+async function togglePrimary(skill) {
+  try {
+    const data = skill.pinned
+      ? await api.clearPrimarySkill(props.sessionId, skill.name)
+      : await api.setPrimarySkill(props.sessionId, skill.name);
+    activeSkills.value = data.skills;
+  } catch (err) {
+    error.value = err.message;
+  }
+}
 
 /**
  * @param {number} turnId
@@ -54,7 +93,10 @@ function follow(turnId, userText, replace = false) {
   subscription = subscribeTurn(turnId, (event) => {
     applyEvent(view, event);
     scrollToBottom();
-    if (event.type === 'turn_end') refreshSessions();
+    if (event.type === 'turn_end') {
+      refreshSessions();
+      loadActiveSkills();
+    }
   });
   subscription.done.catch((err) => {
     view.status = 'failed';
@@ -80,6 +122,7 @@ async function send() {
     }
     follow(turnId, text);
     refreshSessions();
+    loadActiveSkills();
   } catch (err) {
     error.value = err.message;
   } finally {
@@ -125,6 +168,33 @@ function scrollToBottom() {
       </div>
     </div>
     <div class="composer">
+      <div v-if="activeSkills.length" class="skill-chips">
+        <span class="muted small">生效中</span>
+        <span
+          v-for="s in activeSkills"
+          :key="s.name"
+          class="skill-chip"
+          :class="{ primary: s.primary }"
+          :title="
+            s.pinned
+              ? `${s.description}（你指定的主导，再点一下取消指定）`
+              : s.primary
+                ? `${s.description}（当前按最近使用排在前面，点一下固定它）`
+                : `点击设为主导 · ${s.description}`
+          "
+        >
+          <button
+            class="chip-name"
+            :aria-label="s.pinned ? `取消 ${s.name} 的主导指定` : `把 ${s.name} 设为主导`"
+            @click="togglePrimary(s)"
+          >
+            <code>{{ s.name }}</code>
+            <span v-if="s.pinned" class="chip-tag">主导</span>
+            <span v-else-if="s.primary" class="chip-tag auto">自动</span>
+          </button>
+          <button class="chip-close" :aria-label="`退出 ${s.name}`" @click="leaveSkill(s.name)">×</button>
+        </span>
+      </div>
       <p v-if="error" class="error small">{{ error }}</p>
       <div class="composer-box">
         <textarea

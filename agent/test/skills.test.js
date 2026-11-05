@@ -1,0 +1,321 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+
+import { DEFAULT_SECTIONS, buildSystemPrompt, skillsSection } from '../src/context.js';
+import { runTool } from '../src/tools/registry.js';
+import { createToolRegistry } from '../src/tools/index.js';
+import { useSkill } from '../src/tools/skills.js';
+
+const SKILL = {
+  name: 'weekly-report',
+  description: '按团队模板撰写个人周报。',
+  body: '# 写周报\n\n1. 先读 references/template.md',
+  files: ['references/template.md'],
+};
+
+const LIST = [{ name: 'weekly-report', description: '按团队模板撰写个人周报。' }];
+
+/** @param {Partial<{ skill: any, file: any, skills: any[], failure: Error, activationFailure: Error }>} [options] */
+function fakeBackend(options = {}) {
+  return {
+    calls: /** @type {any[]} */ ([]),
+    /** @param {number} sessionId */
+    async listSkills(sessionId) {
+      this.calls.push(['list', sessionId]);
+      if (options.failure) throw options.failure;
+      return { skills: options.skills ?? LIST };
+    },
+    /** @param {number} sessionId @param {string} name */
+    async getSkill(sessionId, name) {
+      this.calls.push(['skill', sessionId, name]);
+      if (options.failure) throw options.failure;
+      return options.skill ?? SKILL;
+    },
+    /** @param {number} sessionId @param {string} name @param {string} file */
+    async getSkillFile(sessionId, name, file) {
+      this.calls.push(['file', sessionId, name, file]);
+      if (options.failure) throw options.failure;
+      return options.file ?? { path: file, content: '【周报】模板正文' };
+    },
+    /** @param {number} sessionId @param {string} name */
+    async activateSkill(sessionId, name) {
+      this.calls.push(['activate', sessionId, name]);
+      if (options.activationFailure) throw options.activationFailure;
+      return { skills: [name] };
+    },
+  };
+}
+
+/** @param {any} backend */
+const ctx = (backend) => ({
+  sessionId: 1,
+  turnId: 1,
+  backend,
+  emit() {},
+  signal: new AbortController().signal,
+});
+
+test('use_skill returns the body and marks the skill active for the session', async () => {
+  const backend = fakeBackend();
+  const text = await useSkill.execute({ name: ' weekly-report ' }, ctx(backend));
+  assert.match(text, /# 写周报/);
+  assert.match(text, /按团队模板撰写个人周报/);
+  assert.match(text, /references\/template\.md/);
+  // name 两端空白要清掉，否则后端按名字查不到；读完正文要记进会话。
+  // 读写都要带上会话号：用户退出过的 skill 由后端按会话挡住。
+  assert.deepEqual(backend.calls, [
+    ['skill', 1, 'weekly-report'],
+    ['activate', 1, 'weekly-report'],
+  ]);
+});
+
+test('reading a skill does not promise tools for a later turn', async () => {
+  const backend = fakeBackend({
+    skill: { ...SKILL, allowed_tools: ['fetch_url', 'run_sql'] },
+  });
+  const text = await useSkill.execute({ name: 'weekly-report' }, ctx(backend));
+  // 工具结果会留在历史里，写到「下一回合才能用」会让模型之后每轮都等着
+  assert.doesNotMatch(text, /下一回合/);
+  assert.doesNotMatch(text, /声明的工具/);
+});
+
+test('reading an attached file does not re-activate the skill', async () => {
+  const backend = fakeBackend();
+  await useSkill.execute({ name: 'weekly-report', file: 'references/template.md' }, ctx(backend));
+  assert.deepEqual(backend.calls, [['file', 1, 'weekly-report', 'references/template.md']]);
+});
+
+test('a failed activation still returns the body', async () => {
+  const backend = fakeBackend({ activationFailure: new Error('后端挂了') });
+  const text = await useSkill.execute({ name: 'weekly-report' }, ctx(backend));
+  assert.match(text, /# 写周报/);
+});
+
+test('use_skill without a name returns the catalog instead of a body', async () => {
+  const backend = fakeBackend();
+  const text = await useSkill.execute({}, ctx(backend));
+  assert.match(text, /可用的 skill（1 个）/);
+  assert.match(text, /weekly-report：按团队模板撰写个人周报。/);
+  assert.match(text, /use_skill\(name\)/);
+  assert.deepEqual(backend.calls, [['list', 1]]);
+});
+
+test('use_skill renders an empty catalog without inventing entries', async () => {
+  const backend = fakeBackend({ skills: [] });
+  assert.equal(await useSkill.execute({}, ctx(backend)), '当前没有可用的 skill。');
+});
+
+test('use_skill reads an attached file when file is given', async () => {
+  const backend = fakeBackend();
+  const text = await useSkill.execute(
+    { name: 'weekly-report', file: 'references/template.md' },
+    ctx(backend),
+  );
+  assert.equal(text, '【周报】模板正文');
+  assert.deepEqual(backend.calls, [['file', 1, 'weekly-report', 'references/template.md']]);
+});
+
+test('use_skill refuses a file without a skill name', async () => {
+  const backend = fakeBackend();
+  await assert.rejects(
+    () => useSkill.execute({ file: 'references/template.md' }, ctx(backend)),
+    /需要同时提供 name/,
+  );
+  assert.deepEqual(backend.calls, []);
+});
+
+test('missing skill becomes an error result for the model, not a thrown turn', async () => {
+  const backend = fakeBackend({ failure: new Error('后端 404：skill 不存在或有问题') });
+  const out = await runTool(
+    createToolRegistry(),
+    new Set(['use_skill']),
+    { id: 'c1', type: 'function', function: { name: 'use_skill', arguments: '{"name":"nope"}' } },
+    ctx(backend),
+  );
+  assert.equal(out.ok, false);
+  assert.match(out.content, /404/);
+});
+
+test('use_skill is registered by default and visible in settings', () => {
+  const registry = createToolRegistry();
+  assert.ok(registry.get('use_skill'));
+  assert.ok(registry.visibleTools({}).includes('use_skill'));
+});
+
+test('system prompt only says skills exist, never lists them', () => {
+  const prompt = buildSystemPrompt(DEFAULT_SECTIONS, {
+    system_prompt: '',
+    skills: LIST,
+  });
+  assert.match(prompt, /use_skill/);
+  // 关键：清单里任何一条都不能出现在系统提示里，否则每回合都在为它付 token
+  assert.doesNotMatch(prompt, /weekly-report/);
+  assert.doesNotMatch(prompt, /按团队模板撰写个人周报/);
+  // 提示长度不随 skill 数量变化
+  assert.ok(/** @type {string} */ (skillsSection.render({ skills: LIST })).length < 160);
+});
+
+test('system prompt drops the skill section when nothing is installed', () => {
+  const without = buildSystemPrompt(DEFAULT_SECTIONS, { system_prompt: '', skills: [] });
+  assert.doesNotMatch(without, /可用的 skill/);
+  assert.doesNotMatch(without, /\n\n\n/);
+});
+
+test('a skill invoked with /name gets its body written into the prompt', () => {
+  const prompt = buildSystemPrompt(DEFAULT_SECTIONS, {
+    system_prompt: '',
+    skills: LIST,
+    active_skills: [
+      {
+        name: 'weekly-report',
+        description: '按团队模板撰写个人周报。',
+        body: '# 写周报\n\n先读模板',
+        files: ['references/template.md'],
+        allowed_tools: [],
+      },
+    ],
+  });
+  assert.match(prompt, /用户指定本回合使用 skill「weekly-report」/);
+  assert.match(prompt, /先读模板/);
+  assert.match(prompt, /references\/template\.md/);
+  // 点名的 skill 放在「有可用 skill」提示之后，两条都在也不冲突
+  assert.ok(prompt.indexOf('用户指定本回合使用') > prompt.indexOf('有可用的 skill'));
+});
+
+test('prompt has no active skill section when the user did not name one', () => {
+  const prompt = buildSystemPrompt(DEFAULT_SECTIONS, { system_prompt: '', skills: LIST });
+  assert.doesNotMatch(prompt, /用户指定本回合使用/);
+});
+
+test('prompt spells out the tools available this turn', () => {
+  const prompt = buildSystemPrompt(DEFAULT_SECTIONS, {
+    system_prompt: '',
+    visible_tools: ['current_time', 'use_skill', 'fetch_url'],
+  });
+  assert.match(prompt, /本回合可调用的工具：current_time、use_skill、fetch_url/);
+  assert.match(prompt, /以这份列表为准/);
+});
+
+test('a skill kept from earlier turns is labelled as session-scoped', () => {
+  const prompt = buildSystemPrompt(DEFAULT_SECTIONS, {
+    system_prompt: '',
+    skills: LIST,
+    active_skills: [
+      {
+        name: 'weekly-report',
+        description: '按团队模板撰写个人周报。',
+        body: '# 写周报\n\n先读模板',
+        files: [],
+        allowed_tools: ['fetch_url'],
+        reason: 'session',
+      },
+    ],
+  });
+  assert.match(prompt, /本会话已启用 skill「weekly-report」/);
+  // 必须说清之后每条消息都算数，否则模型会按 skill 正文里的适用条件把它当成「只在命令后生效」
+  assert.match(prompt, /它对之后每条消息都生效/);
+  assert.match(prompt, /即使消息里没有 \/weekly-report 命令也照样按它处理/);
+  // 工具已经开放这件事要写成文字，模型不会主动去翻接口参数
+  assert.match(prompt, /本回合已经开放：fetch_url/);
+  // 描述是「什么时候该挑这个 skill」的触发条件，出现在生效段里会被模型拿来论证不适用
+  assert.doesNotMatch(prompt, /按团队模板撰写个人周报。/);
+  assert.doesNotMatch(prompt, /用户指定本回合使用/);
+  assert.match(prompt, /先读模板/);
+});
+
+test('several active skills get a rule for picking one, and only the lead brings its body', () => {
+  const prompt = buildSystemPrompt(DEFAULT_SECTIONS, {
+    system_prompt: '',
+    skills: LIST,
+    active_skills: [
+      {
+        name: 'web-research',
+        description: '查公开网页资料。',
+        body: '# 调研\n\n先抓页面再总结',
+        files: [],
+        allowed_tools: ['fetch_url'],
+        reason: 'session',
+        role: 'primary',
+      },
+      {
+        name: 'tech-doc-writing',
+        description: '按团队规范写技术文档。',
+        body: '# 文档规范\n\n标题用动宾短语',
+        files: [],
+        allowed_tools: [],
+        reason: 'session',
+        role: 'secondary',
+      },
+    ],
+  });
+
+  // 光有「每个都对每条消息生效」时，模型会把两套做法混在一起，所以要给判断顺序
+  assert.match(prompt, /本会话有 2 个 skill 生效/);
+  assert.match(prompt, /只有一个和这条消息直接相关时，就用它/);
+  assert.match(prompt, /多个都相关时，用主导的「web-research」/);
+  assert.match(prompt, /别把两套做法或两种格式混在一起/);
+  assert.match(prompt, /实在分不清用户要按哪个，先问一句/);
+
+  // 主导带正文，待命的只有一句话：正文在场就会混着用
+  assert.match(prompt, /主导的 skill「web-research」/);
+  assert.match(prompt, /先抓页面再总结/);
+  assert.doesNotMatch(prompt, /标题用动宾短语/);
+  assert.match(prompt, /待命的 skill「tech-doc-writing」：按团队规范写技术文档。/);
+  assert.match(prompt, /use_skill\(\{ name: 'tech-doc-writing' \}\)/);
+});
+
+test('a lead the user pinned must not be swapped by the model', () => {
+  const prompt = buildSystemPrompt(DEFAULT_SECTIONS, {
+    system_prompt: '',
+    skills: LIST,
+    active_skills: [
+      {
+        name: 'weekly-report',
+        description: '按团队模板撰写个人周报。',
+        body: '# 写周报',
+        files: [],
+        allowed_tools: [],
+        reason: 'session',
+        role: 'primary',
+        pinned: true,
+      },
+      {
+        name: 'meeting-minutes',
+        description: '整理会议纪要。',
+        body: '',
+        files: [],
+        allowed_tools: [],
+        reason: 'session',
+        role: 'secondary',
+      },
+    ],
+  });
+  // 用户点了这个主导，模型不能因为「另一个更相关」就自己换掉
+  assert.match(prompt, /「weekly-report」是用户自己指定的主导/);
+  assert.match(prompt, /不要自己换成别的 skill/);
+  assert.match(prompt, /先问一句要不要换/);
+  assert.match(prompt, /完全无关时，照常回答，别硬套/);
+  assert.match(prompt, /用户指定了这个对话的主导 skill「weekly-report」/);
+  // 「只有一个相关就用它」会给出换人的口子，指定过主导时不能保留这条
+  assert.doesNotMatch(prompt, /只有一个和这条消息直接相关时/);
+});
+
+test('a single active skill keeps the plain wording without the rule block', () => {
+  const prompt = buildSystemPrompt(DEFAULT_SECTIONS, {
+    system_prompt: '',
+    skills: LIST,
+    active_skills: [
+      {
+        name: 'weekly-report',
+        description: '写周报。',
+        body: '# 写周报',
+        files: [],
+        allowed_tools: [],
+        reason: 'session',
+        role: 'primary',
+      },
+    ],
+  });
+  assert.doesNotMatch(prompt, /本会话有 1 个 skill 生效/);
+  assert.match(prompt, /本会话已启用 skill「weekly-report」/);
+});

@@ -34,7 +34,161 @@ export const userInstructionsSection = {
   render: (ctx) => (ctx.system_prompt.trim() ? `用户的附加要求：\n${ctx.system_prompt.trim()}` : null),
 };
 
-export const DEFAULT_SECTIONS = [identitySection, environmentSection, userInstructionsSection];
+/**
+ * 本回合可以调用哪些工具，逐个写出来。
+ *
+ * 工具定义本身会作为接口参数发给模型，但实测它会凭印象说「我没有这个工具」，
+ * 甚至读到别处的说明也照样否认。写在系统提示里、并且每回合重算，它才肯认。
+ * 单独成段而不是塞进 skill 段：塞进去会被当成 skill 自己的说法，不被当作事实。
+ * @type {PromptSection}
+ */
+export const toolsSection = {
+  id: 'tools',
+  render: (ctx) => {
+    const tools = ctx.visible_tools ?? [];
+    if (!tools.length) return null;
+    return `本回合可调用的工具：${tools.join('、')}。以这份列表为准，回合内不会变化。`;
+  },
+};
+
+/**
+ * skill 的存在性提示：不列清单，只说明「有，可以查」。
+ *
+ * 清单本身每回合都要付 token，而多数对话一个 skill 都用不到；改成按需查询后，
+ * 这段文案不随 skill 数量变化，也顺带对前缀缓存友好。
+ * @type {PromptSection}
+ */
+export const skillsSection = {
+  id: 'skills',
+  render: (ctx) =>
+    ctx.skills?.length
+      ? '有可用的 skill。用户的要求如果像是有现成做法可循（成文的流程、模板、规范），先调用 use_skill 查看清单，再按名字读取说明照着做；不要凭名字猜内容。'
+      : null,
+};
+
+/**
+ * 生效中的 skill，正文直接写进系统提示。
+ *
+ * 分两种来源：用户这一条消息点名的，和本会话此前用上、继续生效的。
+ *
+ * 会话这一种有两点讲究，都是踩过坑才加上的：
+ * 1. 必须说清「对之后每条消息都生效、没有命令也照样用」。只说「继续按它说的做」时，
+ *    模型会退回按适用范围判断，没有命令前缀的下一句就被当成普通聊天。
+ * 2. 不能带 description。skill 的描述是写给挑选用的触发条件（「用户要求翻译时，
+ *    或以 /translate 开头时」），一旦出现在「当前生效」的上下文里，模型就拿它
+ *    反过来论证这个 skill 此刻不适用——正文还在提示里，却一次都没被用。
+ *
+ * 排最后：这一段的存废和内容随会话变化，靠后能少破坏前面的前缀缓存。
+ * @type {PromptSection}
+ */
+export const activeSkillsSection = {
+  id: 'active-skills',
+  render: (ctx) => {
+    const active = ctx.active_skills ?? [];
+    if (!active.length) return null;
+    // role 缺省当主导：老路径（单 skill）不传这个字段，行为保持不变
+    const primary = active.filter((skill) => (skill.role ?? 'primary') === 'primary');
+    const waiting = active.filter((skill) => skill.role === 'secondary');
+    const blocks = [];
+    if (primary.length + waiting.length > 1) {
+      blocks.push(choiceRules(primary, waiting, primary.some((s) => s.pinned)));
+    }
+    for (const skill of primary) blocks.push(renderActive(skill, active.length > 1));
+    for (const skill of waiting) blocks.push(renderWaiting(skill));
+    return blocks.join('\n\n');
+  },
+};
+
+/**
+ * 多个 skill 同时生效时的判断规则。不给规则时，每个 skill 的段落都在说「对之后每条
+ * 消息都生效」，模型会把几套做法混在一起用。
+ * @param {any[]} primary
+ * @param {any[]} waiting
+ * @param {boolean} pinned 主导是用户自己点的
+ */
+function choiceRules(primary, waiting, pinned) {
+  const lead = primary.map((s) => `「${s.name}」`).join('、');
+  const rest = waiting.map((s) => `「${s.name}」`).join('、');
+  const head = `本会话有 ${primary.length + waiting.length} 个 skill 生效：`
+    + `${lead}${rest ? `、${rest}` : ''}。`;
+  if (pinned) {
+    // 用户明确指定过主导，就不能让它按「哪个更相关」被换掉：用户点这个就是为了定下来
+    return [
+      `${head}「${primary[0].name}」是用户自己指定的主导，不是你挑的。按这个来：`,
+      `1. 这条消息能套用「${primary[0].name}」时，就用它，不要自己换成别的 skill；`
+        + '你觉得别的更合适，先问一句要不要换；',
+      `2. 这条消息和「${primary[0].name}」完全无关时，照常回答，别硬套；`,
+      '3. 主导管不到的地方可以用待命的 skill 补充，但先把它的正文读出来（use_skill），别凭名字猜。',
+    ].join('\n');
+  }
+  return [
+    `${head}用哪个按这个顺序判断：`,
+    '1. 只有一个和这条消息直接相关时，就用它，不用管其它几个；',
+    `2. 多个都相关时，用主导的${lead}，其它只在它没覆盖的地方补充，别把两套做法或两种格式混在一起；`,
+    '3. 实在分不清用户要按哪个，先问一句，别猜；',
+    '4. 都不相关就都不套用，正常回答。',
+  ].join('\n');
+}
+
+/**
+ * 主导的那个：连同正文一起给。
+ * @param {any} skill
+ * @param {boolean} contested 是否还有别的 skill 在场
+ */
+function renderActive(skill, contested) {
+  const parts = [];
+  if (skill.reason === 'session') {
+    const label = skill.pinned
+      ? `用户指定了这个对话的主导 skill「${skill.name}」`
+      : contested
+        ? `主导的 skill「${skill.name}」`
+        : `本会话已启用 skill「${skill.name}」`;
+    parts.push(
+      `${label}，它对之后每条消息都生效，即使消息里没有 /${skill.name}`
+        + ' 命令也照样按它处理。下面是当前生效的做法：',
+      skill.body,
+    );
+  } else {
+    parts.push(`用户指定本回合使用 skill「${skill.name}」（${skill.description}），照它说的做：`, skill.body);
+  }
+  // 工具清单是接口参数，模型未必会去翻；实测它会顺着上一句「下一回合才能用」继续说没有。
+  // 所以这里把已开放的工具写成文字，明确到「现在就能调」。
+  if (skill.allowed_tools?.length) {
+    parts.push(
+      `这个 skill 需要的工具本回合已经开放：${skill.allowed_tools.join('、')}。`
+        + '需要时直接调用，不要说它不存在或再等一个回合。',
+    );
+  }
+  if (skill.reason === 'session') {
+    parts.push('用户明确说停用、或明确要你去做别的事时才不套用它。');
+  }
+  if (skill.files?.length) {
+    parts.push(
+      `附带文件：${skill.files.join('、')}。需要时用 use_skill({ name: '${skill.name}', file }) 读取。`,
+    );
+  }
+  return parts.join('\n\n');
+}
+
+/**
+ * 待命的：只给名字和一句话描述，不给正文。正文一进来，几套规范就会混着用；
+ * 不给正文，模型要真需要就会自己去读，这也是整个 skill 系统的按需加载原则。
+ * @param {any} skill
+ */
+function renderWaiting(skill) {
+  return `待命的 skill「${skill.name}」：${skill.description}\n`
+    + `这条消息用不到它就别管它。真需要时先调用 use_skill({ name: '${skill.name}' })`
+    + ' 读完整做法，再照着做。';
+}
+
+export const DEFAULT_SECTIONS = [
+  identitySection,
+  environmentSection,
+  userInstructionsSection,
+  toolsSection,
+  skillsSection,
+  activeSkillsSection,
+];
 
 /**
  * @param {PromptSection[]} sections

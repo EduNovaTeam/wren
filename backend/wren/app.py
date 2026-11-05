@@ -12,7 +12,7 @@ from flask import Flask, jsonify, send_from_directory
 from werkzeug.exceptions import HTTPException
 
 from . import store
-from .api import chat, close_db, internal, notes_api, settings_api
+from .api import chat, close_db, internal, notes_api, settings_api, skills_api
 from .config import REPO_ROOT, Config
 from .db import connect, migrate
 from .turns import TurnRegistry
@@ -23,6 +23,8 @@ BLUEPRINTS = [
     internal.bp,
     notes_api.bp,
     notes_api.internal_bp,
+    skills_api.bp,
+    skills_api.internal_bp,
 ]
 
 WEB_DIST = REPO_ROOT / "web" / "dist"

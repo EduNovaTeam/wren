@@ -44,6 +44,13 @@ export const api = {
   listTurns: (sessionId) => request('GET', `/api/sessions/${sessionId}/turns`),
   createTurn: (sessionId, content) => request('POST', `/api/sessions/${sessionId}/turns`, { content }),
   stopTurn: (turnId) => request('POST', `/api/turns/${turnId}/stop`),
+  listSessionSkills: (sessionId) => request('GET', `/api/sessions/${sessionId}/skills`),
+  leaveSessionSkill: (sessionId, name) =>
+    request('DELETE', `/api/sessions/${sessionId}/skills/${encodeURIComponent(name)}`),
+  setPrimarySkill: (sessionId, name) =>
+    request('POST', `/api/sessions/${sessionId}/skills/${encodeURIComponent(name)}/primary`),
+  clearPrimarySkill: (sessionId, name) =>
+    request('DELETE', `/api/sessions/${sessionId}/skills/${encodeURIComponent(name)}/primary`),
 
   getModel: () => request('GET', '/api/settings/model'),
   putModel: (patch) => request('PUT', '/api/settings/model', patch),
@@ -52,6 +59,10 @@ export const api = {
   putTools: (switches) => request('PUT', '/api/settings/tools', switches),
   getSystemPrompt: () => request('GET', '/api/settings/system-prompt'),
   putSystemPrompt: (text) => request('PUT', '/api/settings/system-prompt', { system_prompt: text }),
+
+  listSkills: () => request('GET', '/api/skills'),
+  setSkillEnabled: (name, enabled) =>
+    request('PUT', `/api/skills/${encodeURIComponent(name)}`, { enabled }),
 
   listNotes: () => request('GET', '/api/notes'),
   deleteNote: (id) => request('DELETE', `/api/notes/${id}`),

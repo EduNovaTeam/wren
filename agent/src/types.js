@@ -19,6 +19,25 @@
  */
 
 /**
+ * @typedef {object} SkillSummary
+ * @property {string} name
+ * @property {string} description
+ * @property {'builtin'|'user'} source
+ */
+
+/**
+ * 生效中的 skill：正文随上下文直接下发，本回合不必再查。
+ * @typedef {object} ActiveSkill
+ * @property {string} name
+ * @property {string} description
+ * @property {string} body
+ * @property {string[]} files
+ * @property {string[]} allowed_tools
+ * @property {'invoked'|'session'} reason  invoked=用户这条消息点名的，session=本会话此前用上的
+ * @property {'primary'|'secondary'} [role]  primary=主导（带正文），secondary=待命（只有描述）
+ */
+
+/**
  * 后端 `GET /internal/turns/:id/context` 的返回值。
  * @typedef {object} TurnContext
  * @property {number} session_id
@@ -26,6 +45,10 @@
  * @property {ModelSettings} model
  * @property {string} system_prompt  用户在设置页填写的自定义提示，可能为空
  * @property {Record<string, boolean>} tool_switches
+ * @property {SkillSummary[]} skills  可用的 skill 清单（只有名字和描述，正文按需读取）
+ * @property {ActiveSkill[]} active_skills  本回合点名的、以及本会话已启用的 skill
+ * @property {string[]} [left_skills]  用户在本会话里退出过的 skill 名（不再生效）
+ * @property {string[]} [visible_tools]  本回合可调用的工具，由 turn.js 填，供系统提示使用
  * @property {HistoryTurn[]} history  按时间顺序，已结束的回合
  * @property {ChatMessage} user_message
  */

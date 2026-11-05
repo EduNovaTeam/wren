@@ -68,6 +68,69 @@ async function main() {
   const second = llm.requests[1];
   check(second.messages.some((m) => m.role === 'tool'), '第二次模型请求应包含工具结果');
 
+  // skill：agent 按需从 /internal/skills 取正文，验证两边的接口对得上
+  const skill = await call('GET', `${base}/internal/skills/weekly-report`, undefined, {
+    'X-Wren-Internal-Token': 'e2e-token',
+  });
+  check(skill.files.includes('references/template.md'), `skill 应带模板文件：${skill.files}`);
+  llm.push(
+    { reasoning: '按周报 skill 写', tool_calls: [{ name: 'use_skill', arguments: { name: 'weekly-report' } }] },
+    { text: '已读取周报 skill。' },
+  );
+  const skillTurn = await call('POST', `${base}/api/sessions/${session.id}/turns`, { content: '帮我写周报' });
+  const skillEvents = await readSse(`${base}/api/turns/${skillTurn.turn_id}/events`);
+  check(skillEvents.at(-1)?.status === 'done', `第二个回合应以 done 结束：${JSON.stringify(skillEvents.at(-1))}`);
+  const toolMessage = skillEvents.find((e) => e.type === 'message' && e.message.role === 'tool');
+  check(toolMessage && toolMessage.message.content.includes('# 写周报'), 'skill 正文没有进入工具结果');
+
+  // 用户用 /skill-name 点名：正文由后端随上下文下发，模型不必再调工具
+  llm.push({ text: '好的，按周报 skill 的格式写。' });
+  const invoked = await call('POST', `${base}/api/sessions/${session.id}/turns`, {
+    content: '/weekly-report 本周做了 A',
+  });
+  const invokedEvents = await readSse(`${base}/api/turns/${invoked.turn_id}/events`);
+  check(
+    invokedEvents.at(-1)?.status === 'done',
+    `点名 skill 的回合应以 done 结束：${JSON.stringify(invokedEvents.at(-1))}`,
+  );
+  const system = llm.requests.at(-1).messages[0];
+  check(
+    system.role === 'system' && system.content.includes('# 写周报'),
+    `点名 skill 的正文没有进入系统提示：${String(system.content).slice(0, 200)}`,
+  );
+
+  // 下一回合不再点名，skill 应该还生效
+  llm.push({ text: '继续。' });
+  const continued = await call('POST', `${base}/api/sessions/${session.id}/turns`, { content: '继续' });
+  const continuedEvents = await readSse(`${base}/api/turns/${continued.turn_id}/events`);
+  check(
+    continuedEvents.at(-1)?.status === 'done',
+    `延续回合应以 done 结束：${JSON.stringify(continuedEvents.at(-1))}`,
+  );
+  const continuedSystem = llm.requests.at(-1).messages[0].content;
+  check(
+    continuedSystem.includes('本会话已启用 skill「weekly-report」')
+      && continuedSystem.includes('它对之后每条消息都生效'),
+    '后续回合没有继续带上 skill',
+  );
+  check(continuedSystem.includes('# 写周报'), '后续回合丢了 skill 正文');
+
+  // skill 自带的工具：web-research 声明了 allowed-tools: fetch_url
+  const beforeTools = llm.requests.at(-1).tools?.map((t) => t.function.name) ?? [];
+  check(!beforeTools.includes('fetch_url'), `fetch_url 不该默认可见：${beforeTools}`);
+
+  llm.push({ text: '我来查一下。' });
+  const research = await call('POST', `${base}/api/sessions/${session.id}/turns`, {
+    content: '/web-research 查一下 wren 的 skill 规范',
+  });
+  const researchEvents = await readSse(`${base}/api/turns/${research.turn_id}/events`);
+  check(
+    researchEvents.at(-1)?.status === 'done',
+    `带工具的 skill 回合应以 done 结束：${JSON.stringify(researchEvents.at(-1))}`,
+  );
+  const withTools = llm.requests.at(-1).tools?.map((t) => t.function.name) ?? [];
+  check(withTools.includes('fetch_url'), `skill 的 allowed-tools 没有开放：${withTools}`);
+
   await llm.close();
   console.log(`e2e ok：${types.length} 个事件，${turns[0].messages.length} 条消息`);
 }
@@ -128,11 +191,14 @@ async function waitFor(url, timeoutMs = 20_000) {
   }
 }
 
-/** @param {string} method @param {string} url @param {unknown} [body] */
-async function call(method, url, body) {
+/** @param {string} method @param {string} url @param {unknown} [body] @param {Record<string,string>} [headers] */
+async function call(method, url, body, headers = {}) {
   const res = await fetch(url, {
     method,
-    headers: body === undefined ? {} : { 'Content-Type': 'application/json' },
+    headers: {
+      ...headers,
+      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+    },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const data = await res.json();

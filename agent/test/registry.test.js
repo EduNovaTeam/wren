@@ -27,6 +27,19 @@ test('visibleTools respects switches and on-demand exposure', () => {
   assert.deepEqual(r.list().find((t) => t.name === 'hidden')?.toggleable, false);
 });
 
+test('visibleTools opens on-demand tools only when a skill asks for them', () => {
+  const r = registry();
+  // 没有 skill 要，on-demand 的工具不出现
+  assert.deepEqual(r.visibleTools({}), ['ok', 'boom', 'slow']);
+  assert.deepEqual(r.visibleTools({}, ['hidden']), ['ok', 'boom', 'slow', 'hidden']);
+  // 没注册的名字忽略，不能让回合失败
+  assert.deepEqual(r.visibleTools({}, ['nope']), ['ok', 'boom', 'slow']);
+  // 开关归用户管：skill 不能替用户打开被关掉的工具
+  assert.deepEqual(r.visibleTools({ ok: false }, ['ok']), ['boom', 'slow']);
+  // 重复声明只出现一次
+  assert.deepEqual(r.visibleTools({}, ['hidden', 'hidden']), ['ok', 'boom', 'slow', 'hidden']);
+});
+
 test('register rejects duplicates and bad names', () => {
   const r = registry();
   assert.throws(() => r.register({ name: 'ok', description: '', parameters: schema, execute() {} }));
