@@ -10,14 +10,14 @@ import hmac
 
 from flask import Blueprint, abort, request
 
-from .. import settings, store
+from .. import settings, skill_state, store
 from . import cfg, db
 
 bp = Blueprint("internal", __name__, url_prefix="/internal")
 
 
 @bp.before_request
-def require_token():
+def require_token() -> None:
     token = request.headers.get("X-Wren-Internal-Token", "")
     if not hmac.compare_digest(token, cfg().internal_token):
         abort(401, "内部接口口令错误")
@@ -34,6 +34,8 @@ def turn_context(turn_id: int):
         abort(409, f"回合已结束（{turn['status']}）")
     current = [t for t in store.list_turns(conn, turn["session_id"]) if t["id"] == turn_id][0]
     user_message = next(m for m in current["messages"] if m["role"] == "user")
+    available = [s for s in skill_state.list_skills(conn, cfg()) if s["valid"] and s["enabled"]]
+    active = skill_state.get_active(conn, cfg(), turn["session_id"])
     return {
         "session_id": turn["session_id"],
         "turn_id": turn_id,
@@ -42,4 +44,5 @@ def turn_context(turn_id: int):
         "tool_switches": settings.get_tool_switches(conn),
         "history": store.history(conn, turn["session_id"], turn_id),
         "user_message": {"role": "user", "content": user_message["content"]},
+        "skills": {"available": available, "active": active},
     }

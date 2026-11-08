@@ -10,6 +10,7 @@ requires-python = ">=3.11"
 dependencies = [
   "flask>=3.1,<4",
   "requests>=2.32,<3",
+  "PyYAML>=6,<7",
 ]
 
 [project.optional-dependencies]

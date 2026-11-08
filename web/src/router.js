@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router';
 
 import { notesRoute } from './features/notes.js';
+import { skillsRoute } from './features/skills.js';
 import ChatView from './views/ChatView.vue';
 import SettingsView from './views/SettingsView.vue';
 
@@ -20,6 +21,7 @@ export const routes = [
       { path: 'model', name: 'settings-model', component: () => import('./views/settings/ModelSettings.vue') },
       { path: 'tools', name: 'settings-tools', component: () => import('./views/settings/ToolSettings.vue') },
       { path: 'prompt', name: 'settings-prompt', component: () => import('./views/settings/PromptSettings.vue') },
+      skillsRoute,
     ],
   },
 ];

@@ -3,6 +3,7 @@
  */
 
 import { notesLink } from './features/notes.js';
+import { skillsSection } from './features/skills.js';
 
 /** @type {{ to: string, label: string }[]} */
 export const sidebarLinks = [notesLink, { to: '/settings', label: '设置' }];
@@ -12,4 +13,5 @@ export const settingsSections = [
   { to: '/settings/model', label: '模型' },
   { to: '/settings/tools', label: '工具' },
   { to: '/settings/prompt', label: '系统提示' },
+  skillsSection,
 ];

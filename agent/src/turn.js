@@ -7,6 +7,7 @@
 
 import { buildSystemPrompt, selectHistory } from './context.js';
 import { LLMError, streamCompletion } from './llm.js';
+import { prepareSkills } from './skills.js';
 import { runTool } from './tools/registry.js';
 
 /** 框架自身使用的事件类型。工具通过 ctx.emit 发的自定义事件不能占用这些名字。 */
@@ -43,23 +44,31 @@ export async function runTurn(ctx, deps, emit, signal) {
   const complete = deps.complete ?? streamCompletion;
   const model = ctx.model;
 
-  // 本回合可见的工具在开始时确定，整个回合不变。
-  const visibleNames = deps.registry.visibleTools(ctx.tool_switches);
-  const visible = new Set(visibleNames);
-  const tools = deps.registry.schemas(visibleNames);
+  // 技能运行时也属于本回合开始前确定的可见集合；准备失败也要发 turn_end。
+  let runtime;
+  try {
+    runtime = await prepareSkills(ctx, deps.registry, deps.backend, emit, signal);
+  } catch (err) {
+    emit({ type: 'turn_end', status: signal.aborted ? 'stopped' : 'failed', error: errorMessage(err) });
+    return;
+  }
+
+  // 默认工具开关在回合开始时确定；技能激活可为下一次模型请求开放按需工具。
+  const visibleNames = runtime.visibleTools;
 
   const history = selectHistory(ctx.history, model.history_budget_tokens);
   /** @type {import('./types.js').ChatMessage[]} */
   const messages = [
-    { role: 'system', content: buildSystemPrompt(deps.sections, ctx) },
+    { role: 'system', content: buildSystemPrompt([...deps.sections, runtime.section], ctx) },
     ...history.messages,
-    ctx.user_message,
+    runtime.userMessage,
   ];
   emit({
     type: 'turn_info',
     tools: visibleNames,
     history_turns: history.keptTurns,
     dropped_turns: history.droppedTurns,
+    skills: runtime.names(),
   });
 
   const toolCtx = {
@@ -79,6 +88,10 @@ export async function runTurn(ctx, deps, emit, signal) {
   try {
     for (let step = 1; step <= model.max_steps; step++) {
       const last = step === model.max_steps;
+      // 同一模型响应中的工具调用共用本步权限，不能借前一个调用临时扩权。
+      const visible = new Set(runtime.visibleTools);
+      const tools = runtime.registry.schemas([...visible]);
+      messages[0].content = buildSystemPrompt([...deps.sections, runtime.section], ctx);
       emit({ type: 'step_start', step });
       partial = { reasoning: '', text: '' };
 
@@ -124,7 +137,7 @@ export async function runTurn(ctx, deps, emit, signal) {
           name: call.function.name,
           arguments: call.function.arguments,
         });
-        const out = await runTool(deps.registry, visible, call, { ...toolCtx, signal });
+        const out = await runTool(runtime.registry, visible, call, { ...toolCtx, signal });
         /** @type {import('./types.js').ChatMessage} */
         const toolMsg = {
           role: 'tool',

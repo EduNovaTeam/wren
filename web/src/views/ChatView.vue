@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'v
 import { useRouter } from 'vue-router';
 
 import { api, subscribeTurn } from '@/api/client.js';
+import SessionSkills from '@/components/SessionSkills.vue';
 import TurnItem from '@/components/TurnItem.vue';
 import { applyEvent, fromStored, newLiveView } from '@/chat/turnView.js';
 import { refreshSessions } from '@/stores/sessions.js';
@@ -17,6 +18,7 @@ const error = ref('');
 const loading = ref(false);
 const sending = ref(false);
 const scroller = ref(null);
+const skillsRevision = ref(0);
 /** @type {{ close: () => void } | null} */
 let subscription = null;
 
@@ -53,6 +55,7 @@ function follow(turnId, userText, replace = false) {
   subscription?.close();
   subscription = subscribeTurn(turnId, (event) => {
     applyEvent(view, event);
+    if (event.type === 'skill_activated' || event.type === 'turn_end') skillsRevision.value++;
     scrollToBottom();
     if (event.type === 'turn_end') refreshSessions();
   });
@@ -126,11 +129,16 @@ function scrollToBottom() {
     </div>
     <div class="composer">
       <p v-if="error" class="error small">{{ error }}</p>
+      <SessionSkills
+        :session-id="sessionId"
+        :running="Boolean(running)"
+        :revision="skillsRevision"
+      />
       <div class="composer-box">
         <textarea
           v-model="input"
           rows="2"
-          placeholder="输入消息，Enter 发送，Shift+Enter 换行"
+          placeholder="输入消息，Enter 发送，Shift+Enter 换行，可用 /技能名 指定技能"
           @keydown="onKeydown"
         />
         <button v-if="running" class="btn danger" @click="stop">停止</button>

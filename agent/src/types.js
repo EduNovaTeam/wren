@@ -28,6 +28,7 @@
  * @property {Record<string, boolean>} tool_switches
  * @property {HistoryTurn[]} history  按时间顺序，已结束的回合
  * @property {ChatMessage} user_message
+ * @property {{ available: import('./skills.js').SkillMeta[], active: import('./skills.js').ActiveSkill[] }} [skills]
  */
 
 /**

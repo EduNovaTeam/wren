@@ -19,6 +19,10 @@ class Config:
     # 单个回合从 agent 读事件流的最长静默时间（秒）。模型思考期间 agent 会持续发事件，
     # 超过这个时间没有任何字节，视为 agent 失联。
     agent_read_timeout: float = 180.0
+    # 内置技能目录（随仓库发布）。
+    builtin_skills_dir: Path = REPO_ROOT / "skills"
+    # 用户技能目录；为 None 时使用 data_dir / "skills"。
+    user_skills_dir: Path | None = None
 
     @property
     def db_path(self) -> Path:
@@ -35,9 +39,11 @@ class Config:
             )
         agent_port = env.get("WREN_AGENT_PORT", "5281")
         data_dir = Path(env.get("WREN_DATA_DIR") or REPO_ROOT / "data")
+        skills_dir = env.get("WREN_SKILLS_DIR", "").strip()
         return cls(
             data_dir=data_dir.resolve(),
             agent_url=env.get("WREN_AGENT_URL") or f"http://127.0.0.1:{agent_port}",
             internal_token=token,
             port=int(env.get("WREN_BACKEND_PORT", "5280")),
+            user_skills_dir=Path(skills_dir).resolve() if skills_dir else None,
         )

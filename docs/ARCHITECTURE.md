@@ -19,7 +19,7 @@
 1. **后端是唯一的持久化层。** agent 进程不保存任何跨回合状态，可以随时重启；工具需要读写数据时调用后端的 `/internal/*` 接口。
 2. **回合记录是完整的。** 每个回合保存用户消息，以及 agent 产生的每一条 assistant / tool 消息，字段与 Chat Completions 一致（包括 `reasoning_content`、`tool_calls`）。思考模式下带 `tools` 的请求必须回传历史上的 `reasoning_content`，所以不能只存正文。
 3. **历史按预算截断。** agent 从最新的回合往前取，放不下的回合整回合丢弃（`context.js` 的 `selectHistory`）；预算在「设置 → 模型 → 历史预算」，按估算 token 计。被丢弃的回合模型看不到，界面会提示。
-4. **工具可见列表在回合开始时确定。** `ToolRegistry.visibleTools()` 按设置页的开关算出本回合的工具，整个回合内不变，同一份列表既决定发给模型的 `tools` 参数，也决定 `runTool` 允许执行哪些工具。
+4. **工具开关在回合开始时确定，技能按需开放工具。** `ToolRegistry.visibleTools()` 计算默认工具，技能运行时在每回合的注册表副本上补充 `load_skill`、资料读取和已激活技能声明的按需工具。成功加载技能后，从下一次模型请求开始更新提示和可见列表；同一个模型响应中的所有工具调用使用本步开始时的同一份列表，同时约束 `tools` 参数和 `runTool`，不能借同批先前调用临时扩权。全局关闭的工具始终不开放，未注册的工具只提示缺失。
 5. **单用户、无登录。** 后端只监听 127.0.0.1。
 6. **同一会话同时只有一个进行中的回合。** 第二个请求返回 409。
 7. **后端单进程运行。** 回合运行器在进程内存里（`turns.py`），不支持多 worker。
@@ -48,7 +48,8 @@ agent → 后端（NDJSON）与 后端 → 浏览器（SSE `data:`）使用同�
 | type | 字段 | 说明 |
 |---|---|---|
 | `turn_start` | `turn_id`, `user_message_id` | 后端产生 |
-| `turn_info` | `tools`, `history_turns`, `dropped_turns` | 本回合可见工具、实际发送 / 丢弃的历史回合数 |
+| `turn_info` | `tools`, `skills`, `history_turns`, `dropped_turns` | 回合开始时的可见工具与激活技能、实际发送 / 丢弃的历史回合数 |
+| `skill_activated` | `name`, `source`, `missing_tools` | 成功激活技能；后端已保存会话激活记录，事件用于实时显示 |
 | `step_start` | `step` | 每次调用模型前 |
 | `reasoning_delta` / `text_delta` | `text` | 增量，仅用于显示，不落库 |
 | `message` | `message` | 一条完整消息（assistant 或 tool），**后端据此落库** |

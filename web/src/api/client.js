@@ -53,6 +53,12 @@ export const api = {
   getSystemPrompt: () => request('GET', '/api/settings/system-prompt'),
   putSystemPrompt: (text) => request('PUT', '/api/settings/system-prompt', { system_prompt: text }),
 
+  getSkills: () => request('GET', '/api/settings/skills'),
+  putSkills: (switches) => request('PUT', '/api/settings/skills', switches),
+  getSessionSkills: (sessionId) => request('GET', `/api/sessions/${sessionId}/skills`),
+  removeSessionSkill: (sessionId, name) =>
+    request('DELETE', `/api/sessions/${sessionId}/skills/${encodeURIComponent(name)}`),
+
   listNotes: () => request('GET', '/api/notes'),
   deleteNote: (id) => request('DELETE', `/api/notes/${id}`),
 };
